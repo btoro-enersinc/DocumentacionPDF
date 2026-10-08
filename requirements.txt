@@ -1,0 +1,7 @@
+google-adk
+markdown
+xhtml2pdf
+requests
+pypdf
+matplotlib
+pillow

@@ -1,0 +1,27 @@
+# Secretos y credenciales (nunca subir)
+.env
+.env.*
+*.pem
+*credentials*.json
+*service-account*.json
+automatizaciones-ia-*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.envrc
+
+# Cachés y temporales
+data/cache_xm/
+data/graficas/
+*.tmp
+.DS_Store
+Thumbs.db
+
+# IDEs
+.idea/
+.vscode/
+*.swp
