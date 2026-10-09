@@ -29,12 +29,43 @@ _load_dotenv()
 
 import markdown
 import requests
+
+
+def _asegurar_bidi():
+    """xhtml2pdf importa python-bidi. En este equipo el Control de aplicaciones
+    bloquea su DLL nativa; un sustituto basta para texto en español (izquierda a derecha)."""
+    import sys
+    import types
+
+    try:
+        from bidi import get_display as _ok  # noqa: F401
+        return
+    except (ImportError, OSError):
+        pass
+    for nombre in list(sys.modules):
+        if nombre == "bidi" or nombre.startswith("bidi."):
+            del sys.modules[nombre]
+
+    def get_display(str_or_bytes, encoding="utf-8", base_dir=None, debug=False):
+        return str_or_bytes
+
+    def get_base_level(text):
+        return 0
+
+    mod = types.ModuleType("bidi")
+    mod.get_display = get_display
+    mod.get_base_level = get_base_level
+    sys.modules["bidi"] = mod
+
+
+_asegurar_bidi()
 from xhtml2pdf import pisa
 
 try:
-    from graficas_xm import generar_graficas
+    from graficas_xm import generar_graficas, temas_detectados
 except ImportError:       # falta matplotlib: el informe sale igual, sin gráficas
     generar_graficas = None
+    temas_detectados = None
 import logging
 logging.getLogger("xhtml2pdf").setLevel(logging.ERROR)
 
@@ -1290,10 +1321,12 @@ from concurrent.futures import ThreadPoolExecutor
 from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 
 GROUNDED_MODEL = os.environ.get("GROUNDED_MODEL") or "gemini-3.1-pro-preview"
-RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or GROUNDED_MODEL
+# La investigación con búsqueda web usa un modelo rápido. La redacción sigue en GROUNDED_MODEL.
+RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or "gemini-2.5-flash"
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT_SECONDS") or "20")
-LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS") or "240")
+LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS") or "150")
+RESEARCH_TIMEOUT_SECONDS = int(os.environ.get("RESEARCH_TIMEOUT_SECONDS") or "70")
 MAX_FUENTES_EVIDENCIA = int(os.environ.get("MAX_FUENTES_EVIDENCIA") or "24")
 MAX_FUENTES_INFORME = int(os.environ.get("MAX_FUENTES_INFORME") or "12")
 # Palabras que se reservan en el PDF para el bloque "Referencias".
@@ -1394,12 +1427,13 @@ def _genai_client():
         return _GENAI_CLIENT
 
 
-def _llm(prompt: str, model=None, buscar=False, temperature=0.2, intentos=3):
+def _llm(prompt: str, model=None, buscar=False, temperature=0.2, intentos=2, timeout_s=None):
     """Llamada a Gemini con reintentos. buscar=True activa Google Search grounding."""
     from google.genai import types
+    espera = int(timeout_s or LLM_TIMEOUT_SECONDS)
     cfg = dict(
         temperature=temperature,
-        http_options=types.HttpOptions(timeout=LLM_TIMEOUT_SECONDS * 1000),
+        http_options=types.HttpOptions(timeout=espera * 1000),
     )
     cfg["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(disable=True)
     if buscar:
@@ -1831,10 +1865,9 @@ def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> st
         f"FECHA ACTUAL: {fecha} (Colombia). 'Reciente' significa los últimos 12 meses respecto a esta fecha.\n"
         f"{guia}\n\nPREGUNTA DEL USUARIO: {pregunta.strip()}\n"
         + (f"\nPistas (no verificadas, solo para orientar la búsqueda):\n{contexto[:2500]}\n" if contexto else "")
-        + "\nDevuelve entre 18 y 32 HECHOS verificables, uno por línea. Además de cifras y fechas recientes, "
-        "incluye hechos de CONTEXTO que permitan explicar el tema a fondo: definiciones y umbrales vigentes, "
-        "cómo funciona el mecanismo o la norma (quién hace qué, cómo se liquida o calcula), antecedentes, "
-        "modificaciones posteriores y causas o efectos señalados por la fuente. Formato exacto:\n"
+        + "\nHaz como máximo 6 búsquedas web y detente. Devuelve entre 8 y 14 HECHOS verificables, "
+        "uno por línea: la norma o el dato más reciente, su contexto inmediato y la causa o el efecto "
+        "que la fuente señale. Formato exacto:\n"
         "- <hecho concreto con la cifra, fecha o número de norma tal como aparece en la fuente> | "
         "<periodo o fecha del dato> | <entidad o medio> | <URL exacta de la página consultada>\n"
         "No inventes nada: si no encuentras un dato con fuente, no lo incluyas."
@@ -1845,7 +1878,10 @@ def _investigar_grounded(pregunta: str, enfoque: str, contexto: str = ""):
     """Una búsqueda con grounding. Devuelve (texto, [(uri, titulo)], [(segmento, [idx])])."""
     t0 = _time.time()
     try:
-        resp = _llm(_prompt_investigacion(pregunta, enfoque, contexto), model=RESEARCH_MODEL, buscar=True)
+        resp = _llm(
+            _prompt_investigacion(pregunta, enfoque, contexto),
+            model=RESEARCH_MODEL, buscar=True, intentos=2, timeout_s=RESEARCH_TIMEOUT_SECONDS,
+        )
     except Exception as exc:
         _log(f"   [investigación {enfoque}] error: {exc}")
         return "", [], []
@@ -3015,20 +3051,41 @@ if __name__ == "__main__":
         CORREO = ""
     CORREO = ", ".join(destinos)
 
+    paginas = args.max_pages
+    if paginas is None and sys.stdin.isatty():
+        while True:
+            raw = input("3. ¿Cuántas páginas? (Enter = 2, mínimo 2): ").strip()
+            if not raw:
+                paginas = 2
+                break
+            if raw.isdigit() and int(raw) >= 2:
+                paginas = int(raw)
+                break
+            print("   Escribe un entero de 2 o más, o Enter para dejar 2.")
+    paginas = max(2, int(paginas or MAX_PAGES))
+
     enviar = not args.no_email and (os.environ.get("SEND_EMAIL", "1").strip() not in {"0", "false", "no"})
     if enviar and not _credenciales_correo_ok():
         enviar = sys.stdin.isatty() and _pedir_credenciales_smtp()
         if not enviar:
             print("Aviso: sin credenciales de correo -> se genera solo el PDF (sin envío).")
     print(f"\nDestino: {CORREO}" + ("" if enviar else " (solo aparecerá en el PDF, no se enviará)"))
+    print(f"Páginas: {paginas}")
+    con_graficas = not args.sin_graficas and (
+        os.environ.get("GRAFICAS", "1").strip().lower() not in {"0", "false", "no"})
+    if con_graficas and temas_detectados:
+        series = temas_detectados(PREGUNTA)
+        if series:
+            print(f"Sinergox: sí, gráficas de {', '.join(series)}")
+        else:
+            print("Sinergox: no. La pregunta no pide precio, embalses, aportes ni demanda.")
+            con_graficas = False
 
     texto_md = None
     if args.desde_md:
         texto_md = Path(args.desde_md).read_text(encoding="utf-8")
         texto_md = re.sub(r"^<!--.*?-->\s*", "", texto_md, flags=re.S)
 
-    con_graficas = not args.sin_graficas and (
-        os.environ.get("GRAFICAS", "1").strip().lower() not in {"0", "false", "no"})
     ejecutar_flujo_completo(PREGUNTA, CORREO, enviar=enviar,
-                            max_pages=args.max_pages, texto_md=texto_md,
+                            max_pages=paginas, texto_md=texto_md,
                             con_graficas=con_graficas)

@@ -1,0 +1,76 @@
+# Se dispara a mano desde GitHub → Actions → Informe PDF → Run workflow.
+# El generador de Python no se modifica: aquí solo se le pasan pregunta, correo y páginas.
+name: Informe PDF
+
+on:
+  workflow_dispatch:
+    inputs:
+      prompt:
+        description: Pregunta del informe
+        required: true
+        default: Analizar las últimas resoluciones CREG
+        type: string
+      email:
+        description: Correo destino
+        required: true
+        type: string
+      paginas:
+        description: Páginas (mínimo 2). Vacío = 2
+        required: false
+        default: "2"
+        type: string
+
+jobs:
+  generar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Código
+        uses: actions/checkout@v4
+
+      - name: Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Dependencias
+        run: pip install -r requirements.txt
+
+      - name: Generar PDF y enviar
+        env:
+          PROMPT: ${{ inputs.prompt }}
+          EMAIL: ${{ inputs.email }}
+          PAGINAS: ${{ inputs.paginas }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          GOOGLE_APPLICATION_CREDENTIALS_JSON: ${{ secrets.GOOGLE_APPLICATION_CREDENTIALS_JSON }}
+          API_GATEWAY_DATOS_URL: ${{ secrets.API_GATEWAY_DATOS_URL }}
+          API_GATEWAY_DATOS_KEY: ${{ secrets.API_GATEWAY_DATOS_KEY }}
+          EMAIL_SENDER: ${{ secrets.EMAIL_SENDER }}
+          AGENT_BACKEND: ${{ secrets.AGENT_BACKEND }}
+          CES_PROJECT_ID: ${{ secrets.CES_PROJECT_ID }}
+          CES_LOCATION: ${{ secrets.CES_LOCATION }}
+          CES_APP_ID: ${{ secrets.CES_APP_ID }}
+          CES_VERSION_ID: ${{ secrets.CES_VERSION_ID }}
+          CES_DEPLOYMENT_ID: ${{ secrets.CES_DEPLOYMENT_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "${GOOGLE_APPLICATION_CREDENTIALS_JSON:-}" ]; then
+            printf '%s' "$GOOGLE_APPLICATION_CREDENTIALS_JSON" > "$RUNNER_TEMP/gcp.json"
+            export GOOGLE_APPLICATION_CREDENTIALS="$RUNNER_TEMP/gcp.json"
+          fi
+          case "$PAGINAS" in
+            ''|*[!0-9]*) PAGINAS=2 ;;
+          esac
+          if [ "$PAGINAS" -lt 2 ]; then PAGINAS=2; fi
+          python generar_reporte_local.py \
+            --pregunta "$PROMPT" \
+            --correo "$EMAIL" \
+            --max-pages "$PAGINAS"
+
+      - name: Guardar PDF
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: informe-pdf
+          path: data/pdfs/*.pdf
+          if-no-files-found: ignore

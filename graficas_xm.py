@@ -209,11 +209,11 @@ def _dibujar_demanda(ax, d):
 
 # clave, patrón (sobre pregunta sin acentos), carga, dibujo, serie mínima, título
 _CATALOGO = (
-    ("aportes", re.compile(r"aporte|hidrolog|caudal"),
+    ("aportes", re.compile(r"aporte|hidrolog|caudal|\bnino\b|sequia|hidric"),
      _datos_aportes, _dibujar_aportes, "aportes", "Aportes hídricos"),
-    ("embalses", re.compile(r"embalse|volumen util|reserva(?:s)? hidric"),
+    ("embalses", re.compile(r"embalse|volumen util|reserva|\bnino\b|sequia"),
      _datos_embalses, _dibujar_embalses, "vol", "Embalses"),
-    ("precio", re.compile(r"precio de bolsa|precio bolsa|bolsa nacional|precio de escasez|\bescasez\b"),
+    ("precio", re.compile(r"precio de bolsa|precio bolsa|bolsa nacional|\bbolsa\b|escasez|tarifa"),
      _datos_precio, _dibujar_precio, "bolsa", "Precio de bolsa"),
     ("demanda", re.compile(r"\bdemanda\b"),
      _datos_demanda, _dibujar_demanda, "demanda", "Demanda"),
@@ -222,24 +222,14 @@ _CATALOGO = (
 
 def temas_detectados(pregunta: str):
     """
-    Solo lee la pregunta. Genera gráficas si:
-      a) pide gráficas/indicadores y nombra series, o
-      b) pide ver/mostrar la evolución de una serie (sin decir 'gráfica').
-    Una resolución que solo menciona embalses en el análisis NO activa gráficas.
+    Decide solo con la pregunta si hay que entrar a Sinergox.
+    Entra cuando nombra una serie que XM publica (precio, embalses, aportes, demanda).
+    Una pregunta solo normativa (resolución, ley, decreto) no entra.
     """
     t = _sin_acentos(pregunta)
-    pide_grafica = bool(re.search(
-        r"\bgraficas?\b|\bcharts?\b|\bindicadores?\b|"
-        r"\bincluy[ea].{0,40}graf|\bcon graf|\bagrega.{0,40}graf|\banexa.{0,40}graf|"
-        r"\bmuestr[ae].{0,40}(graf|evolucion|serie|tendencia)|"
-        r"\bevolucion\b|\btendencia\b|\bcomo van\b|\bcomo esta(?:n)?\b",
-        t,
-    ))
-    if not pide_grafica:
+    if re.search(r"\bsin graficas?\b|\bno incluy", t):
         return []
-    nombradas = [c[0] for c in _CATALOGO if c[1].search(t)]
-    # "incluye gráficas" sin nombrar series -> las 4 de mercado
-    return (nombradas or [c[0] for c in _CATALOGO])[:MAX_GRAFICAS]
+    return [c[0] for c in _CATALOGO if c[1].search(t)][:MAX_GRAFICAS]
 
 
 def _guardar_una(clave, dibujar, datos, ruta: Path):
