@@ -1,4 +1,5 @@
 import base64
+import io
 import os
 import re
 import sqlite3
@@ -10,6 +11,10 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from email.mime.application import MIMEApplication
 from pathlib import Path
+
+from pypdf import PdfReader, PdfWriter
+from reportlab.lib.pagesizes import A4
+from reportlab.pdfgen import canvas
 
 def _load_dotenv():
     """Carga .env local si existe (SENDER_EMAIL, APP_PASSWORD, GOOGLE_API_KEY)."""
@@ -1203,6 +1208,62 @@ def _render_pdf_bytes(html: str) -> bytes:
     return buf.getvalue()
 
 
+def _pdf_con_graficas(pdf_bytes: bytes, graficas) -> bytes:
+    """Añade las series XM en páginas propias. xhtml2pdf no dibuja esos PNG."""
+    imagenes = [img for img in (graficas.get("imagenes") or []) if Path(img["ruta"]).is_file()]
+    if not imagenes:
+        raise RuntimeError("No quedaron archivos de gráficas para insertar en el PDF.")
+    desde = graficas["desde"].strftime("%d/%m/%Y")
+    hasta = graficas["hasta"].strftime("%d/%m/%Y")
+    consultado = graficas["consultado"].strftime("%d/%m/%Y")
+    nota = (f"Fuente: XM, Sinergox (API XM, servapibi.xm.com.co). Series del {desde} al {hasta}; "
+            f"consultado el {consultado}. Elaboración: Enersinc.")
+    if graficas.get("preliminares_omitidos"):
+        nota += " Se omiten los últimos días de demanda por datos preliminares incompletos."
+
+    buf = io.BytesIO()
+    lienzo = canvas.Canvas(buf, pagesize=A4)
+    ancho, alto = A4
+    margen = 40
+    ancho_img = ancho - 2 * margen
+    alto_img = ancho_img * 165 / 440
+
+    def _nueva():
+        lienzo.setFillColorRGB(0.008, 0.518, 0.780)
+        lienzo.setFont("Helvetica-Bold", 11)
+        lienzo.drawString(margen, alto - 46, "Indicadores del mercado (datos XM · Sinergox)")
+        return alto - 64
+
+    y = _nueva()
+    for img in imagenes:
+        if y - alto_img < 78:
+            lienzo.showPage()
+            y = _nueva()
+        lienzo.drawImage(
+            str(img["ruta"]), margen, y - alto_img,
+            width=ancho_img, height=alto_img,
+            preserveAspectRatio=True, anchor="c", mask="auto",
+        )
+        y -= alto_img + 16
+    texto = lienzo.beginText(margen, max(40, y))
+    texto.setFont("Helvetica", 8)
+    texto.setFillColorRGB(0.39, 0.45, 0.55)
+    texto.textLine(nota[:170])
+    if len(nota) > 170:
+        texto.textLine(nota[170:340])
+    lienzo.drawText(texto)
+    lienzo.save()
+
+    writer = PdfWriter()
+    for pagina in PdfReader(io.BytesIO(pdf_bytes)).pages:
+        writer.add_page(pagina)
+    for pagina in PdfReader(io.BytesIO(buf.getvalue())).pages:
+        writer.add_page(pagina)
+    salida = io.BytesIO()
+    writer.write(salida)
+    return salida.getvalue()
+
+
 def _contar_imagenes_pdf(pdf_bytes: bytes) -> int:
     try:
         import io
@@ -1306,17 +1367,12 @@ def markdown_a_pdf(texto_md, titulo_documento, prompt_usuario, correo_destino,
             recortado = True
 
     if graficas:
-        antes = _contar_imagenes_pdf(data)
-        data, paginas = _intentar(cuerpo_final, font_usado, con_graficas=True)
-        despues = _contar_imagenes_pdf(data)
-        pedidas = len(graficas.get("imagenes") or [])
-        if antes >= 0 and despues >= 0 and despues <= antes:
-            raise RuntimeError(
-                f"El PDF no incluyó las {pedidas} gráficas "
-                f"(imágenes antes {antes}, después {despues})."
-            )
-        if antes >= 0 and despues >= 0:
-            print(f"   Gráficas incrustadas en el PDF: {despues - antes}")
+        paginas_texto = paginas
+        data = _pdf_con_graficas(data, graficas)
+        paginas = _contar_paginas(data) or paginas
+        if paginas <= paginas_texto:
+            raise RuntimeError("El PDF no agregó la página de gráficas.")
+        print(f"   Gráficas en página propia: {paginas - paginas_texto} página(s) añadida(s)")
 
     with open(ruta_salida_pdf, "wb") as fh:
         fh.write(data)
