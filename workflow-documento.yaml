@@ -47,6 +47,10 @@ main:
                   - AGENT_BACKEND=ces
                   - EMAIL_SENDER=contacto@enersinc.com
                   - PYTHONUNBUFFERED=1
+                  - FAST_REPORT=1
+                  - GROUNDED_MODEL=gemini-2.5-flash
+                  - MAX_FUENTES_EVIDENCIA=16
+                  - MAX_FUENTES_INFORME=8
                   - ${"PROMPT=" + prompt_busqueda}
                   - ${"EMAIL=" + correo_destino}
                   - ${"PAGINAS=" + paginas}

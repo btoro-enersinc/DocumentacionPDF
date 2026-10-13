@@ -1316,6 +1316,7 @@ RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or "gemini-2.5-flash"
 # La corrección tras la validación reescribe todo el informe; con el modelo pro superaba el timeout.
 CORRECTION_MODEL = os.environ.get("CORRECTION_MODEL") or RESEARCH_MODEL
 CORRECTION_TIMEOUT_SECONDS = int(os.environ.get("CORRECTION_TIMEOUT_SECONDS") or "90")
+FAST_REPORT = os.environ.get("FAST_REPORT", "").strip().lower() in {"1", "true", "si", "sí"}
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT_SECONDS") or "20")
 LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS") or "150")
@@ -1842,6 +1843,8 @@ def _fecha_hoy_txt():
 
 def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> str:
     fecha = _fecha_hoy_txt()
+    max_busquedas = 4 if FAST_REPORT else 6
+    rango_hechos = "6 y 10" if FAST_REPORT else "8 y 14"
     oficiales = ("gestornormativo.creg.gov.co y creg.gov.co (resoluciones, circulares, proyectos), "
                  "xm.com.co (informes mensuales del mercado: precio de bolsa, embalses, aportes, generación, demanda), "
                  "upme.gov.co, minenergia.gov.co, superservicios.gov.co, y para leyes y decretos "
@@ -1858,7 +1861,8 @@ def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> st
         f"FECHA ACTUAL: {fecha} (Colombia). 'Reciente' significa los últimos 12 meses respecto a esta fecha.\n"
         f"{guia}\n\nPREGUNTA DEL USUARIO: {pregunta.strip()}\n"
         + (f"\nPistas (no verificadas, solo para orientar la búsqueda):\n{contexto[:2500]}\n" if contexto else "")
-        + "\nHaz como máximo 6 búsquedas web y detente. Devuelve entre 8 y 14 HECHOS verificables, "
+        + f"\nHaz como máximo {max_busquedas} búsquedas web y detente. "
+        f"Devuelve entre {rango_hechos} HECHOS verificables, "
         "uno por línea: la norma o el dato más reciente, su contexto inmediato y la causa o el efecto "
         "que la fuente señale. Formato exacto:\n"
         "- <hecho concreto con la cifra, fecha o número de norma tal como aparece en la fuente> | "
@@ -1924,16 +1928,19 @@ def recopilar_evidencia(pregunta: str, borrador: str = ""):
                 notas_por_url.setdefault(clave, []).append(n)
         return f
 
-    # 1) Búsquedas con grounding (oficial + general) en paralelo, más semillas oficiales.
+    # 1) Búsquedas con grounding, más semillas oficiales.
+    # En modo rápido se usa una sola investigación oficial; conserva trazabilidad y
+    # evita pagar el tiempo de una segunda búsqueda general.
     tema_reg = bool(_RE_TEMA_REGULATORIO.search(_sin_acentos(pregunta))
                     or _RE_TEMA_ACTUALIDAD.search(_sin_acentos(pregunta)))
     tema_mer = bool(_RE_TEMA_MERCADO.search(_sin_acentos(pregunta)))
     with ThreadPoolExecutor(max_workers=4) as ex:
         fut_of = ex.submit(_investigar_grounded, pregunta, "oficial", borrador)
-        fut_ge = ex.submit(_investigar_grounded, pregunta, "general", borrador)
+        fut_ge = None if FAST_REPORT else ex.submit(_investigar_grounded, pregunta, "general", borrador)
         fut_nov = ex.submit(_novedades_creg, pregunta) if tema_reg else None
         fut_xm = ex.submit(_noticias_xm, pregunta) if tema_mer else None
-        res_of, res_ge = fut_of.result(), fut_ge.result()
+        res_of = fut_of.result()
+        res_ge = fut_ge.result() if fut_ge else ("", [], [])
         nov_fuente, nov_normas = fut_nov.result() if fut_nov else (None, [])
         xm_urls = fut_xm.result() if fut_xm else []
 
@@ -2530,7 +2537,9 @@ def generar_informe_con_fuentes(pregunta: str, max_pages=None, borrador: str = "
     if solo_extension:
         _log("   d) Extensión fuera de rango; el PDF ajusta las páginas, sin otra llamada al modelo.")
         extra = []
-    if val["problemas"] or extra:
+    if FAST_REPORT and (val["problemas"] or extra):
+        _log("   d) Modo rápido: se omite la segunda reescritura; los datos sin respaldo se marcarán.")
+    if (val["problemas"] or extra) and not FAST_REPORT:
         _log(f"   d) Pidiendo una corrección al modelo ({CORRECTION_MODEL})…")
         lista = "\n".join(f"- \"{p['frase'][:300]}\" -> {p['motivo']}" for p in val["problemas"][:30])
         lista += ("\n" + "\n".join(f"- {e}" for e in extra)) if extra else ""
