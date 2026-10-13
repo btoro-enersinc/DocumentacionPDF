@@ -995,11 +995,10 @@ def _html_graficas(graficas) -> str:
     for img in imagenes:
         # Ruta de archivo, no file://. xhtml2pdf no pinta un <img> dentro de una tabla.
         ruta = Path(img["ruta"]).resolve().as_posix()
-        bloques.append(
-            f'<img src="{ruta}" width="{img["ancho_pt"]}" height="{img["alto_pt"]}" />'
-        )
+        # 440 pt cabe en el ancho útil (A4 menos márgenes). 490 pt no entra y xhtml2pdf omite la imagen.
+        bloques.append(f'<img src="{ruta}" width="440" height="165" />')
     return (
-        '<div class="graf"><div class="r-tit">Indicadores del mercado (datos XM · Sinergox)</div>'
+        '<div class="graf"><div class="g-tit">Indicadores del mercado (datos XM · Sinergox)</div>'
         + "".join(bloques)
         + f'<div class="cita">{_esc(nota)}</div></div>'
     )
@@ -1116,6 +1115,9 @@ def _html_informe(cuerpo_md, titulo, prompt_usuario, correo_destino, fecha_txt,
   a.ref, span.ref {{ color: #0369a1; font-size: {font_pt - 3}pt; text-decoration: none; }}
   .nv {{ color: #b45309; font-size: {small - 0.5}pt; font-style: italic; }}
   .graf {{ margin-top: 10px; }}
+  .g-tit {{ color: #0284c7; font-size: 8.5pt; font-weight: bold; padding-bottom: 1px;
+            border-bottom: 0.5px solid #cbd5e1; margin-bottom: 6px;
+            font-family: Montserrat, Helvetica, sans-serif; }}
   table.g-tab {{ width: 100%; margin: 4px 0 2px 0; border: none; }}
   td.g-cell {{ padding: 8px 0 10px 0; border: none; text-align: center;
                -pdf-keep-with-next: false; }}
