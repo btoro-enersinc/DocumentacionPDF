@@ -1,0 +1,104 @@
+# Cloud Workflows: workflow-documento (us-west1, proyecto automatizaciones-ia-20260420).
+# Desplegar: gcloud workflows deploy workflow-documento --location=us-west1 --source=workflow-documento.yaml
+# Entrada: {"prompt": "...", "email": "destino@correo.com", "paginas": 2}
+# Clona este repo y ejecuta generar_reporte_local.py en Cloud Build; el script envía el PDF por correo.
+main:
+  params: [input]
+  steps:
+    - inicializar_variables:
+        assign:
+          - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
+          - correo_destino: ${default(map.get(input, "email"), "btoro@unal.edu.co")}
+          - prompt_busqueda: ${default(map.get(input, "prompt"), "Analizar las últimas resoluciones CREG")}
+          - paginas: ${string(default(map.get(input, "paginas"), 2))}
+          - api_builds: ${"https://cloudbuild.googleapis.com/v1/projects/" + proyecto + "/builds"}
+          - secretos: ${"projects/" + proyecto + "/secrets/"}
+
+    - lanzar_build:
+        call: http.post
+        args:
+          url: ${api_builds}
+          auth:
+            type: OAuth2
+          body:
+            timeout: "900s"
+            serviceAccount: ${"projects/" + proyecto + "/serviceAccounts/" + numero_proyecto + "-compute@developer.gserviceaccount.com"}
+            options:
+              logging: CLOUD_LOGGING_ONLY
+            availableSecrets:
+              secretManager:
+                - versionName: ${secretos + "api-gateway-datos-url/versions/latest"}
+                  env: API_GATEWAY_DATOS_URL
+                - versionName: ${secretos + "api-gateway-datos-key/versions/latest"}
+                  env: API_GATEWAY_DATOS_KEY
+                - versionName: ${secretos + "gcp-sa-json/versions/latest"}
+                  env: GCP_SA_JSON
+            steps:
+              - name: gcr.io/cloud-builders/git
+                args: ["clone", "--depth", "1", "--branch", "main", "https://github.com/btoro-enersinc/DocumentacionPDF.git", "src"]
+              - name: python:3.12-slim
+                dir: src
+                secretEnv:
+                  - API_GATEWAY_DATOS_URL
+                  - API_GATEWAY_DATOS_KEY
+                  - GCP_SA_JSON
+                env:
+                  - AGENT_BACKEND=ces
+                  - EMAIL_SENDER=contacto@enersinc.com
+                  - PYTHONUNBUFFERED=1
+                  - ${"PROMPT=" + prompt_busqueda}
+                  - ${"EMAIL=" + correo_destino}
+                  - ${"PAGINAS=" + paginas}
+                script: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  printf '%s' "$GCP_SA_JSON" > /tmp/gcp.json
+                  export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp.json
+                  export GOOGLE_CLOUD_PROJECT=automatizaciones-ia-20260420
+                  pip install -q --root-user-action=ignore --disable-pip-version-check -r requirements.txt
+                  case "$PAGINAS" in
+                    ''|*[!0-9]*) PAGINAS=2 ;;
+                  esac
+                  if [ "$PAGINAS" -lt 2 ]; then PAGINAS=2; fi
+                  python generar_reporte_local.py \
+                    --pregunta "$PROMPT" \
+                    --correo "$EMAIL" \
+                    --max-pages "$PAGINAS"
+        result: lanzado
+
+    - guardar_id:
+        assign:
+          - build_id: ${lanzado.body.metadata.build.id}
+
+    - esperar:
+        call: sys.sleep
+        args:
+          seconds: 10
+
+    - consultar:
+        call: http.get
+        args:
+          url: ${api_builds + "/" + build_id}
+          auth:
+            type: OAuth2
+        result: estado
+
+    - revisar:
+        switch:
+          - condition: ${estado.body.status == "SUCCESS"}
+            next: responder
+          - condition: ${estado.body.status in ["FAILURE", "INTERNAL_ERROR", "TIMEOUT", "CANCELLED", "EXPIRED"]}
+            raise:
+              mensaje: ${"El build terminó en " + estado.body.status}
+              build: ${build_id}
+              log: ${estado.body.logUrl}
+        next: esperar
+
+    - responder:
+        return:
+          estado: "Informe enviado"
+          correo: ${correo_destino}
+          paginas: ${paginas}
+          build: ${build_id}
+          log: ${estado.body.logUrl}

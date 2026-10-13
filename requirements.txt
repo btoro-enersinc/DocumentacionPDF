@@ -1,7 +1,9 @@
-google-adk
+google-genai
+google-auth
 markdown
 xhtml2pdf
 requests
 pypdf
 matplotlib
 pillow
+# Solo para --backend local/adk (agent.py): pip install google-adk

@@ -103,17 +103,8 @@ def _ensure_dirs():
 
 
 def _logo_path():
-    for candidato in (
-        ASSETS_DIR / "logo-enersinc-dark.png",
-        ASSETS_DIR / "logo-enersinc.png",
-        BASE_DIR / "logo.png",
-        BASE_DIR / "logo.jpg",
-        BASE_DIR / "logo.jpeg",
-        ASSETS_DIR / "logo.png",
-    ):
-        if candidato.is_file():
-            return candidato
-    return None
+    logo = ASSETS_DIR / "logo-enersinc-dark.png"
+    return logo if logo.is_file() else None
 
 
 def _ruta_pdf_relativa(ruta_pdf) -> str:
@@ -822,8 +813,7 @@ def _marca_agua_path():
     try:
         return _crear_marca_agua_enersinc(preferida)
     except Exception:
-        antigua = ASSETS_DIR / "marca-agua-confidencial.png"
-        return antigua if antigua.is_file() else None
+        return None
 
 
 def _font_paths():
@@ -1323,6 +1313,9 @@ from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
 GROUNDED_MODEL = os.environ.get("GROUNDED_MODEL") or "gemini-3.1-pro-preview"
 # La investigación con búsqueda web usa un modelo rápido. La redacción sigue en GROUNDED_MODEL.
 RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or "gemini-2.5-flash"
+# La corrección tras la validación reescribe todo el informe; con el modelo pro superaba el timeout.
+CORRECTION_MODEL = os.environ.get("CORRECTION_MODEL") or RESEARCH_MODEL
+CORRECTION_TIMEOUT_SECONDS = int(os.environ.get("CORRECTION_TIMEOUT_SECONDS") or "90")
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT_SECONDS") or "20")
 LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS") or "150")
@@ -2538,7 +2531,7 @@ def generar_informe_con_fuentes(pregunta: str, max_pages=None, borrador: str = "
         _log("   d) Extensión fuera de rango; el PDF ajusta las páginas, sin otra llamada al modelo.")
         extra = []
     if val["problemas"] or extra:
-        _log("   d) Pidiendo una corrección al modelo…")
+        _log(f"   d) Pidiendo una corrección al modelo ({CORRECTION_MODEL})…")
         lista = "\n".join(f"- \"{p['frase'][:300]}\" -> {p['motivo']}" for p in val["problemas"][:30])
         lista += ("\n" + "\n".join(f"- {e}" for e in extra)) if extra else ""
         prompt_fix = (
@@ -2550,7 +2543,9 @@ def generar_informe_con_fuentes(pregunta: str, max_pages=None, borrador: str = "
             f"{minimo} y {_maximo} palabras."
         )
         try:
-            texto2 = _quitar_seccion_fuentes(_limpiar_respuesta(_texto_respuesta_llm(_llm(prompt_fix)).strip()))
+            resp_fix = _llm(prompt_fix, model=CORRECTION_MODEL, intentos=1,
+                            timeout_s=CORRECTION_TIMEOUT_SECONDS)
+            texto2 = _quitar_seccion_fuentes(_limpiar_respuesta(_texto_respuesta_llm(resp_fix).strip()))
             val2 = validar_informe(texto2, fuentes) if texto2 else None
         except Exception as exc:
             _log(f"      Corrección omitida: {exc}")
