@@ -1,3 +1,4 @@
+import base64
 import os
 import re
 import sqlite3
@@ -993,10 +994,11 @@ def _html_graficas(graficas) -> str:
         nota += " Se omiten los últimos días de demanda por datos preliminares incompletos."
     bloques = []
     for img in imagenes:
-        # Ruta de archivo, no file://. xhtml2pdf no pinta un <img> dentro de una tabla.
-        ruta = Path(img["ruta"]).resolve().as_posix()
-        # 440 pt cabe en el ancho útil (A4 menos márgenes). 490 pt no entra y xhtml2pdf omite la imagen.
-        bloques.append(f'<img src="{ruta}" width="440" height="165" />')
+        # data URI: xhtml2pdf reciente rechaza leer un PNG por ruta absoluta.
+        # 440 pt cabe en el ancho útil; 490 pt no entra y la imagen se omite.
+        raw = Path(img["ruta"]).read_bytes()
+        src = "data:image/png;base64," + base64.b64encode(raw).decode("ascii")
+        bloques.append(f'<img src="{src}" width="440" height="165" />')
     return (
         '<div class="graf"><div class="g-tit">Indicadores del mercado (datos XM · Sinergox)</div>'
         + "".join(bloques)
