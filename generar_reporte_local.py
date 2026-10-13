@@ -991,18 +991,17 @@ def _html_graficas(graficas) -> str:
             f"consultado el {consultado}. Elaboración: Enersinc.")
     if graficas.get("preliminares_omitidos"):
         nota += " Se omiten los últimos días de demanda por datos preliminares incompletos."
-    filas = []
+    bloques = []
     for img in imagenes:
-        filas.append(
-            '<tr><td class="g-cell">'
-            f'<img src="{Path(img["ruta"]).resolve().as_uri()}" '
-            f'width="{img["ancho_pt"]}" height="{img["alto_pt"]}" />'
-            "</td></tr>"
+        # Ruta de archivo, no file://. xhtml2pdf no pinta un <img> dentro de una tabla.
+        ruta = Path(img["ruta"]).resolve().as_posix()
+        bloques.append(
+            f'<img src="{ruta}" width="{img["ancho_pt"]}" height="{img["alto_pt"]}" />'
         )
     return (
         '<div class="graf"><div class="r-tit">Indicadores del mercado (datos XM · Sinergox)</div>'
-        '<table class="g-tab">' + "".join(filas) + "</table>"
-        f'<div class="cita">{_esc(nota)}</div></div>'
+        + "".join(bloques)
+        + f'<div class="cita">{_esc(nota)}</div></div>'
     )
 
 
@@ -1179,14 +1178,34 @@ def _html_informe(cuerpo_md, titulo, prompt_usuario, correo_destino, fecha_txt,
 </body></html>"""
 
 
+def _enlace_pdf(uri, _rel):
+    """xhtml2pdf abre rutas locales; un file:// lo deja en blanco."""
+    if uri.startswith("file:"):
+        from urllib.parse import unquote, urlparse
+        ruta = unquote(urlparse(uri).path)
+        if os.name == "nt" and re.match(r"^/[A-Za-z]:", ruta):
+            ruta = ruta[1:]
+        return ruta
+    return uri
+
+
 def _render_pdf_bytes(html: str) -> bytes:
     import io
     _register_pdf_fonts()
     buf = io.BytesIO()
-    status = pisa.CreatePDF(html, dest=buf, encoding="utf-8")
+    status = pisa.CreatePDF(html, dest=buf, encoding="utf-8", link_callback=_enlace_pdf)
     if getattr(status, "err", 0):
         raise RuntimeError("No se pudo generar el PDF (xhtml2pdf).")
     return buf.getvalue()
+
+
+def _contar_imagenes_pdf(pdf_bytes: bytes) -> int:
+    try:
+        import io
+        from pypdf import PdfReader
+        return sum(len(page.images) for page in PdfReader(io.BytesIO(pdf_bytes)).pages)
+    except Exception:
+        return -1
 
 
 def _contar_paginas(pdf_bytes: bytes):
@@ -1283,7 +1302,17 @@ def markdown_a_pdf(texto_md, titulo_documento, prompt_usuario, correo_destino,
             recortado = True
 
     if graficas:
+        antes = _contar_imagenes_pdf(data)
         data, paginas = _intentar(cuerpo_final, font_usado, con_graficas=True)
+        despues = _contar_imagenes_pdf(data)
+        pedidas = len(graficas.get("imagenes") or [])
+        if antes >= 0 and despues >= 0 and despues <= antes:
+            raise RuntimeError(
+                f"El PDF no incluyó las {pedidas} gráficas "
+                f"(imágenes antes {antes}, después {despues})."
+            )
+        if antes >= 0 and despues >= 0:
+            print(f"   Gráficas incrustadas en el PDF: {despues - antes}")
 
     with open(ruta_salida_pdf, "wb") as fh:
         fh.write(data)
