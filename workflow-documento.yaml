@@ -10,7 +10,7 @@ main:
           - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
           - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
           - correo_destino: ${default(map.get(input, "email"), "btoro@unal.edu.co")}
-          - prompt_busqueda: ${default(map.get(input, "prompt"), "Analizar las últimas resoluciones CREG")}
+          - prompt_busqueda: ${default(map.get(input, "prompt"), "Informe para un tomador de decisiones del sector energetico colombiano. Con el precio de bolsa, los embalses, los aportes hidricos y la demanda, evalua si hoy es buen momento o no para tomar la decision de compra o contratacion de energia. Cierra con una recomendacion concreta (tomar ahora, esperar o tomar solo una parte) y el principal riesgo.")}
           - paginas: ${string(default(map.get(input, "paginas"), 2))}
           - api_builds: ${"https://cloudbuild.googleapis.com/v1/projects/" + proyecto + "/builds"}
           - secretos: ${"projects/" + proyecto + "/secrets/"}

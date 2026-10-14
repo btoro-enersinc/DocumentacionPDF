@@ -2736,7 +2736,7 @@ def _es_placeholder_sendgrid(api_key: str) -> bool:
 
 
 
-def enviar_correo_sendgrid(destinatario, ruta_pdf, prompt, titulo, api_key, from_email, from_name="Enersinc AI"):
+def enviar_correo_sendgrid(destinatario, ruta_pdf, presentacion, api_key, from_email, from_name="Enersinc AI"):
     """Envía el PDF con SendGrid (API key real)."""
     import base64
 
@@ -2747,15 +2747,10 @@ def enviar_correo_sendgrid(destinatario, ruta_pdf, prompt, titulo, api_key, from
     payload = {
         "personalizations": [{"to": [{"email": c} for c in _lista_correos(destinatario)]}],
         "from": {"email": from_email, "name": from_name},
-        "subject": f"Enersinc · {titulo}",
+        "subject": presentacion["asunto"],
         "content": [
-            {
-                "type": "text/plain",
-                "value": (
-                    f"Adjunto el informe \"{titulo}\" generado por Enersinc AI.\n\n"
-                    f"Consulta: {prompt}\n"
-                ),
-            }
+            {"type": "text/plain", "value": _cuerpo_correo_texto(presentacion)},
+            {"type": "text/html", "value": _cuerpo_correo_html(presentacion)},
         ],
         "attachments": [
             {
@@ -2780,18 +2775,16 @@ def enviar_correo_sendgrid(destinatario, ruta_pdf, prompt, titulo, api_key, from
     raise RuntimeError(f"SendGrid HTTP {res.status_code}: {(res.text or '')[:300]}")
 
 
-def enviar_correo_smtp(destinatario, ruta_pdf, prompt, titulo, sender_email, app_password):
+def enviar_correo_smtp(destinatario, ruta_pdf, presentacion, sender_email, app_password):
     """Envío real por Gmail SMTP (cuenta de prueba / App Password)."""
     from email.message import EmailMessage
 
     msg = EmailMessage()
-    msg["Subject"] = f"Enersinc · {titulo}"
+    msg["Subject"] = presentacion["asunto"]
     msg["From"] = sender_email
     msg["To"] = ", ".join(_lista_correos(destinatario))
-    msg.set_content(
-        f'Adjunto el informe "{titulo}" generado por Enersinc AI.\n\n'
-        f"Consulta: {prompt}\n"
-    )
+    msg.set_content(_cuerpo_correo_texto(presentacion))
+    msg.add_alternative(_cuerpo_correo_html(presentacion), subtype="html")
     with open(ruta_pdf, "rb") as f:
         data = f.read()
     msg.add_attachment(
@@ -2814,26 +2807,89 @@ def _gateway_config():
     return url, key, sender
 
 
-def _asunto_correo(titulo: str) -> str:
-    """Una sola línea. El gateway agrega la firma HTML; no debe ir en el asunto."""
-    limpio = re.sub(r"[\r\n\t]+", " ", titulo or "")
-    limpio = re.sub(r"\s{2,}", " ", limpio).strip().strip("-–—|")
-    if not limpio:
-        limpio = "Informe Enersinc"
-    return f"Enersinc - {limpio}"[:180]
+def _una_linea(texto: str) -> str:
+    limpio = re.sub(r"[\r\n\t]+", " ", texto or "")
+    return re.sub(r"\s{2,}", " ", limpio).strip().strip("-–—|:")
 
 
-def _cuerpo_correo_html(titulo: str, prompt: str) -> str:
+def _saludo_hora() -> str:
+    hora = _ahora_local()[0].hour
+    if hora < 12:
+        return "Buenos días"
+    if hora < 19:
+        return "Buenas tardes"
+    return "Buenas noches"
+
+
+def _presentacion_correo(prompt: str, titulo: str, texto_md: str = "", con_graficas: bool = False) -> dict:
+    """
+    Asunto y entradilla que invitan a leer el informe, distintos según la pregunta.
+    Si Gemini no responde se usa un texto fijo; el envío nunca espera por esto.
+    """
+    saludo = _saludo_hora()
+    gancho = _una_linea(titulo) or "panorama del sector energético"
+    parrafos = [
+        "Le compartimos el análisis preparado para hoy, con los hechos clave y lo que "
+        "significan para sus decisiones en el sector energético."
+    ]
+    if texto_md.strip():
+        extracto = _RE_CITA.sub("", re.sub(r"\(no verificad[oa]\)", "", texto_md))[:3500]
+        instruccion = (
+            "Eres el equipo de análisis de Enersinc. Escribe la presentación del correo que "
+            "acompaña este informe en PDF, para un tomador de decisiones del sector energético "
+            "colombiano. Tono cordial, profesional y en usted; debe despertar interés por leer "
+            "el informe completo.\n"
+            "Devuelve SOLO un JSON con dos claves:\n"
+            '- "gancho": frase de máximo 70 caracteres con el hallazgo o la conclusión más '
+            "relevante para este lector (irá en el asunto).\n"
+            '- "parrafos": lista de 2 párrafos breves (máximo 45 palabras cada uno). El primero '
+            "presenta lo más importante que encontrará; el segundo anticipa qué decisión o "
+            "recomendación trae el informe sin revelarla del todo.\n"
+            "Reglas: no uses la palabra consulta, no repitas la pregunta textual, no saludes "
+            "(el saludo ya va aparte), no menciones XM ni Sinergox, sin markdown ni citas entre "
+            "corchetes, y no inventes cifras que no estén en el informe.\n\n"
+            f"Pregunta que originó el informe: {prompt}\n\n"
+            f"Informe:\n{extracto}"
+        )
+        try:
+            crudo = _texto_respuesta_llm(_llm(
+                instruccion, model=RESEARCH_MODEL, temperature=0.5, intentos=1, timeout_s=25))
+            datos = json.loads(re.search(r"\{.*\}", crudo, re.S).group(0))
+            nuevo_gancho = _una_linea(str(datos.get("gancho") or ""))
+            nuevos = [_una_linea(str(p)) for p in datos.get("parrafos") or [] if _una_linea(str(p))]
+            if nuevo_gancho:
+                gancho = nuevo_gancho[:90].rstrip(".")
+            if nuevos:
+                parrafos = nuevos[:3]
+        except Exception as exc:
+            print(f"   Presentación del correo con texto fijo ({type(exc).__name__}).")
+    adjunto = "El informe completo va adjunto en PDF"
+    adjunto += ", con las gráficas del mercado." if con_graficas else "."
+    return {
+        "asunto": f"Informe Enersinc · {_fecha_hoy_txt()} · {gancho}"[:180],
+        "saludo": saludo,
+        "parrafos": parrafos + [adjunto],
+    }
+
+
+def _cuerpo_correo_html(presentacion: dict) -> str:
     """HTML corto. La firma de Enersinc la agrega el API Gateway al final."""
+    parrafos = "".join(f"<p>{_esc(p)}</p>" for p in presentacion["parrafos"])
     return (
         '<div style="font-family:Arial,sans-serif;font-size:14px;color:#333333;">'
-        f"<p>Adjunto el informe <strong>{_esc(titulo)}</strong>, generado por Enersinc AI.</p>"
-        f"<p>Consulta: {_esc(prompt)}</p>"
+        f"<p>{_esc(presentacion['saludo'])},</p>"
+        f"{parrafos}"
+        "<p>Que tenga un excelente día.</p>"
         "</div>"
     )
 
 
-def enviar_correo_gateway(destinatario, ruta_pdf, prompt, titulo):
+def _cuerpo_correo_texto(presentacion: dict) -> str:
+    return "\n\n".join([f"{presentacion['saludo']},", *presentacion["parrafos"],
+                        "Que tenga un excelente día."]) + "\n"
+
+
+def enviar_correo_gateway(destinatario, ruta_pdf, presentacion):
     """Envía el PDF por el API Gateway de Enersinc (POST /email/send)."""
     url, key, sender = _gateway_config()
     if not url or not key:
@@ -2845,8 +2901,8 @@ def enviar_correo_gateway(destinatario, ruta_pdf, prompt, titulo):
         "recipients": ",".join(to_emails),
         "cc_recipients": "",
         "bcc_recipients": "",
-        "subject": _asunto_correo(titulo),
-        "content": _cuerpo_correo_html(titulo, prompt),
+        "subject": presentacion["asunto"],
+        "content": _cuerpo_correo_html(presentacion),
         "content_subtype": "html",
     }
     with open(pdf_path, "rb") as f:
@@ -2863,15 +2919,17 @@ def enviar_correo_gateway(destinatario, ruta_pdf, prompt, titulo):
     return True, "gateway"
 
 
-def enviar_correo(destinatario, ruta_pdf, prompt, titulo):
+def enviar_correo(destinatario, ruta_pdf, prompt, titulo, texto_md="", con_graficas=False):
     """
     Envío real: API Gateway de Enersinc (contacto@enersinc.com);
     si no está configurado, SendGrid y luego Gmail SMTP.
     """
+    presentacion = _presentacion_correo(prompt, titulo, texto_md, con_graficas)
+    print(f"   Asunto: {presentacion['asunto']}")
     url, key, sender = _gateway_config()
     if url and key:
         print(f"   Enviando vía API Gateway (from={sender})...")
-        return enviar_correo_gateway(destinatario, ruta_pdf, prompt, titulo)
+        return enviar_correo_gateway(destinatario, ruta_pdf, presentacion)
 
     api_key = (os.environ.get("SENDGRID_API_KEY") or "").strip()
     from_email = (
@@ -2882,7 +2940,7 @@ def enviar_correo(destinatario, ruta_pdf, prompt, titulo):
     if not _es_placeholder_sendgrid(api_key):
         print(f"   Enviando vía SendGrid (from={from_email})...")
         return enviar_correo_sendgrid(
-            destinatario, ruta_pdf, prompt, titulo, api_key, from_email
+            destinatario, ruta_pdf, presentacion, api_key, from_email
         )
 
     sender = (os.environ.get("SENDER_EMAIL") or "").strip()
@@ -2890,7 +2948,7 @@ def enviar_correo(destinatario, ruta_pdf, prompt, titulo):
     if sender and password:
         print(f"   Enviando vía Gmail SMTP (from={sender})...")
         return enviar_correo_smtp(
-            destinatario, ruta_pdf, prompt, titulo, sender, password
+            destinatario, ruta_pdf, presentacion, sender, password
         )
 
     raise RuntimeError(
@@ -3057,7 +3115,8 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
 
     try:
         print(f"3. Enviando correo real a {correo_destino}...")
-        ok, modo = enviar_correo(correo_destino, ruta_abs, prompt, titulo_reporte)
+        ok, modo = enviar_correo(correo_destino, ruta_abs, prompt, titulo_reporte,
+                                 texto_md=texto_respuesta, con_graficas=bool(graficas))
         estado = f"Enviado ({modo})"
         actualizar_estado_db(reporte_id, estado)
         print(f"   {estado} a {correo_destino}.")
