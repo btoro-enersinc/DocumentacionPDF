@@ -1530,7 +1530,8 @@ def _llm(prompt: str, model=None, buscar=False, temperature=0.2, intentos=2, tim
         except Exception as exc:  # errores transitorios (429/503/red)
             ultimo = exc
             _log(f"   [LLM] intento {i + 1}/{intentos} falló: {type(exc).__name__}: {str(exc)[:160]}")
-            _time.sleep(4 * (i + 1))
+            if i + 1 < intentos:
+                _time.sleep(4 * (i + 1))
     raise RuntimeError(f"Gemini no respondió tras {intentos} intentos: {ultimo}")
 
 
@@ -1960,13 +1961,16 @@ def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> st
     )
 
 
-def _investigar_grounded(pregunta: str, enfoque: str, contexto: str = ""):
+def _investigar_grounded(pregunta: str, enfoque: str, contexto: str = "",
+                         intentos=None, timeout_s=None):
     """Una búsqueda con grounding. Devuelve (texto, [(uri, titulo)], [(segmento, [idx])])."""
     t0 = _time.time()
     try:
         resp = _llm(
             _prompt_investigacion(pregunta, enfoque, contexto),
-            model=RESEARCH_MODEL, buscar=True, intentos=2, timeout_s=RESEARCH_TIMEOUT_SECONDS,
+            model=RESEARCH_MODEL, buscar=True,
+            intentos=intentos if intentos is not None else 2,
+            timeout_s=timeout_s or RESEARCH_TIMEOUT_SECONDS,
         )
     except Exception as exc:
         _log(f"   [investigación {enfoque}] error: {exc}")
@@ -1988,6 +1992,25 @@ def _investigar_grounded(pregunta: str, enfoque: str, contexto: str = ""):
     except Exception:
         pass
     return texto, chunks, soportes
+
+
+def _consultas_oficiales_rapidas(pregunta: str):
+    """Divide análisis amplios del mercado para evitar una sola búsqueda larga y frágil."""
+    t = _sin_acentos(pregunta)
+    variables = sum(bool(re.search(rx, t)) for rx in (
+        r"precio|bolsa|contrat",
+        r"embalse|reserva|volumen util",
+        r"aporte|hidrolog|caudal",
+        r"\bdemanda\b",
+    ))
+    if variables < 3:
+        return [pregunta]
+    return [
+        ("Datos oficiales más recientes de Colombia sobre precio de bolsa, exposición "
+         "al mercado spot y precios de contratos de energía."),
+        ("Datos oficiales más recientes de Colombia sobre embalses, aportes hídricos "
+         "y demanda de energía."),
+    ]
 
 
 def recopilar_evidencia(pregunta: str, borrador: str = ""):
@@ -2023,21 +2046,39 @@ def recopilar_evidencia(pregunta: str, borrador: str = ""):
     tema_reg = bool(_RE_TEMA_REGULATORIO.search(_sin_acentos(pregunta))
                     or _RE_TEMA_ACTUALIDAD.search(_sin_acentos(pregunta)))
     tema_mer = bool(_RE_TEMA_MERCADO.search(_sin_acentos(pregunta)))
-    with ThreadPoolExecutor(max_workers=4) as ex:
-        fut_of = ex.submit(_investigar_grounded, pregunta, "oficial", borrador)
+    consultas_oficiales = _consultas_oficiales_rapidas(pregunta) if FAST_REPORT else [pregunta]
+    if len(consultas_oficiales) > 1:
+        _log(f"   Investigación rápida dividida en {len(consultas_oficiales)} consultas oficiales.")
+    with ThreadPoolExecutor(max_workers=5) as ex:
+        fut_oficiales = [
+            ex.submit(
+                _investigar_grounded, consulta, f"oficial {i + 1}",
+                "", 1 if FAST_REPORT else None,
+                min(RESEARCH_TIMEOUT_SECONDS, 55) if FAST_REPORT else None,
+            )
+            for i, consulta in enumerate(consultas_oficiales)
+        ]
         fut_ge = None if FAST_REPORT else ex.submit(_investigar_grounded, pregunta, "general", borrador)
         fut_nov = ex.submit(_novedades_creg, pregunta) if tema_reg else None
         fut_xm = ex.submit(_noticias_xm, pregunta) if tema_mer else None
-        res_of = fut_of.result()
+        res_oficiales = [f.result() for f in fut_oficiales]
         res_ge = fut_ge.result() if fut_ge else ("", [], [])
         nov_fuente, nov_normas = fut_nov.result() if fut_nov else (None, [])
         xm_urls = fut_xm.result() if fut_xm else []
 
-    textos_inv = res_of[0] + "\n" + res_ge[0]
+    resultados_busqueda = res_oficiales + ([res_ge] if fut_ge else [])
+    if FAST_REPORT and not any(texto or chunks for texto, chunks, _ in resultados_busqueda):
+        _log("   Las consultas paralelas no respondieron; se hace un último intento oficial reducido.")
+        resultados_busqueda.append(_investigar_grounded(
+            "Indicadores oficiales recientes del mercado eléctrico colombiano para tomar "
+            "decisiones de compra o contratación de energía.",
+            "respaldo", "", intentos=1, timeout_s=45,
+        ))
+    textos_inv = "\n".join(r[0] for r in resultados_busqueda)
     # 2) URLs candidatas: grounding (redirecciones resueltas) + URLs escritas por el modelo
     #    (se descartan si no responden) + noticias XM + normas mencionadas.
     candidatas = {}   # url -> (origen, titulo_hint, [notas])
-    for texto, chunks, soportes in (res_of, res_ge):
+    for texto, chunks, soportes in resultados_busqueda:
         notas_chunk = {}
         for seg, idxs in soportes:
             for i in idxs:
