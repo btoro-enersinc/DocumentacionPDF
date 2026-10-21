@@ -68,10 +68,11 @@ _asegurar_bidi()
 from xhtml2pdf import pisa
 
 try:
-    from graficas_xm import generar_graficas, temas_detectados
+    from graficas_xm import generar_graficas, temas_detectados, resumen_mercado
 except ImportError:       # falta matplotlib: el informe sale igual, sin gráficas
     generar_graficas = None
     temas_detectados = None
+    resumen_mercado = None
 import logging
 logging.getLogger("xhtml2pdf").setLevel(logging.ERROR)
 
@@ -504,11 +505,12 @@ def _presupuesto_palabras(max_pages=None, grounded=False):
     return objetivo, int(objetivo * 0.88), int(objetivo * 1.08)
 
 
-def construir_prompt_agente(pregunta: str, max_pages=None, grounded=False) -> str:
+def construir_prompt_agente(pregunta: str, max_pages=None, grounded=False, estructura="") -> str:
     """Envuelve la pregunta con instrucciones para un REPORTE PDF explicativo.
 
     Las instrucciones explícitas del usuario tienen prioridad absoluta sobre
     el formato por defecto (conteos, secciones, páginas, longitud, etc.).
+    `estructura` sustituye la estructura por defecto (informes regulatorio y de decisión).
     """
     n = max(1, int(max_pages or MAX_PAGES))
     palabras_objetivo, palabras_min, palabras_max = _presupuesto_palabras(n, grounded)
@@ -563,7 +565,8 @@ def construir_prompt_agente(pregunta: str, max_pages=None, grounded=False) -> st
            "evidencia; las frases puramente explicativas o de análisis (sin datos concretos) no "
            "necesitan cita.\n" if grounded
            else "Indica fecha y fuente de cada dato; no inventes cifras ni números de norma.\n")
-        + "6) Estructura Markdown por defecto (solo si el usuario no pide otra):\n"
+        + (estructura if estructura else
+        "6) Estructura Markdown por defecto (solo si el usuario no pide otra):\n"
         "# <Título técnico, máximo 12 palabras>\n"
         "## Resumen ejecutivo\n"
         f"<UN párrafo sólido de ~{w_res} palabras que responda directamente la pregunta>\n"
@@ -579,7 +582,138 @@ def construir_prompt_agente(pregunta: str, max_pages=None, grounded=False) -> st
         f"<cierre breve de ~{w_cie} palabras: un párrafo corto o 2-3 viñetas de una frase con los "
         "próximos pasos>\n"
         "Si el usuario pide recomendaciones, sustituye '## Conclusión' por '## Recomendaciones' con el "
-        "número exacto de viñetas pedido (si no dice cuántas, 3), cada una de 1-2 frases.\n"
+        "número exacto de viñetas pedido (si no dice cuántas, 3), cada una de 1-2 frases.\n")
+    )
+
+
+def _fecha_larga(d) -> str:
+    meses = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+             "septiembre", "octubre", "noviembre", "diciembre")
+    return f"{d.day} de {meses[d.month - 1]} de {d.year}"
+
+
+def _estructura_regulatorio(desde, hasta) -> str:
+    periodo = f"del {_fecha_larga(desde)} al {_fecha_larga(hasta)}"
+    return (
+        f"6) TIPO DE INFORME: boletín de novedades regulatorias {periodo}. La EVIDENCIA es la lista completa "
+        "de lo que CREG, UPME y CNO publicaron en ese periodo, cada documento con su FECHA DE PUBLICACIÓN.\n"
+        "   - Informa SOLO sobre esas publicaciones. Normas anteriores pueden nombrarse únicamente como la norma "
+        "que la nueva publicación modifica o desarrolla, en media frase y sin explicarlas.\n"
+        "   - No hables del fenómeno de El Niño, del precio de bolsa ni de embalses salvo que el documento "
+        "publicado trate de eso; nada de contexto general del sector.\n"
+        "   - Distingue siempre si es resolución (vigente, obligatoria), proyecto de resolución (borrador en "
+        "consulta: di hasta cuándo hay comentarios) o circular (informativa o procedimental).\n"
+        "   - Si una entidad no publicó nada en el periodo, dilo en una frase en el resumen; no abras sección.\n"
+        "   - Cada frase con fechas, números o nombres de documentos lleva su cita [n], también en el resumen "
+        "(una cita por documento mencionado). Los títulos ### no llevan citas.\n"
+        "   - EXPLICA, no resumas: el lector es un directivo que no leyó la norma y necesita entender por qué "
+        "se expide, qué cambia exactamente frente a la regla anterior (usa la parte resolutiva: artículos, "
+        "fórmulas, umbrales, porcentajes, plazos) y qué consecuencia práctica tiene (costos, ingresos, "
+        "riesgos, trámites). Si usas un término técnico (reconciliación positiva, LBCH, SDL, swap, OCG), "
+        "explícalo en media frase. No copies listas de definiciones.\n"
+        "Estructura Markdown obligatoria:\n"
+        f"# Novedades regulatorias del sector energético: {desde:%d/%m} al {hasta:%d/%m/%Y}\n"
+        "## Resumen\n"
+        "<un párrafo de 120-160 palabras: cuántas publicaciones hubo por entidad, las 2 o 3 más importantes "
+        "y por qué importan para comercializadores, generadores, operadores de red o grandes usuarios, y qué "
+        "plazos vencen pronto>\n"
+        "## Publicaciones destacadas\n"
+        "### <Tipo, entidad y número> (<dd/mm/aaaa>): <tema en lenguaje claro, máximo 10 palabras>\n"
+        "**Por qué se expide.** <2-3 frases con el problema o la situación que atiende, según los motivos de "
+        "la evidencia>\n"
+        "**Qué cambia.** <párrafo de 4-6 frases con las reglas concretas: qué dice cada artículo relevante, "
+        "cómo se calcula o liquida algo, umbrales, porcentajes y fechas; compáralo con la regla anterior si la "
+        "evidencia la menciona>\n"
+        "**A quién afecta y qué debe hacer.** <párrafo de 3-5 frases: agentes afectados, impacto práctico "
+        "(económico, operativo o de reporte), acciones concretas y plazos; en proyectos, hasta cuándo y a "
+        "dónde enviar comentarios y qué conviene revisar antes de comentar>\n"
+        "(entre 3 y 6 publicaciones destacadas, ordenadas por importancia para el mercado eléctrico y de gas: "
+        "primero resoluciones y proyectos de resolución con efecto general, después circulares con obligaciones "
+        "o plazos, acuerdos CNO técnicos y resoluciones UPME del sector)\n"
+        "## Otras publicaciones del periodo\n"
+        "- **<Tipo, entidad y número> (<dd/mm/aaaa>):** <1-2 frases con su objeto y a quién aplica> [n]\n"
+        "(una viñeta por cada publicación restante de la EVIDENCIA, incluidas las administrativas; omite la "
+        "sección solo si no queda ninguna)\n"
+        "## Lectura de conjunto\n"
+        "<un párrafo de 80-120 palabras: qué tendencia regulatoria muestran juntas las publicaciones de la "
+        "semana (p. ej. ajustes a la liquidación del mercado, reglas para renovables, exigencias de "
+        "información) y qué deberían priorizar los agentes; sin datos que no estén en la evidencia>\n"
+        "## Fechas y acciones a seguir\n"
+        "- **<dd/mm/aaaa>:** <plazo concreto (comentarios, reporte, entrada en vigor), quién debe actuar y qué "
+        "hacer> [n]\n"
+        "(una viñeta por plazo, en orden cronológico)\n"
+    )
+
+
+def _estructura_decision() -> str:
+    return (
+        "6) TIPO DE INFORME: recomendación para un tomador de decisiones del sector energético colombiano sobre "
+        "si HOY conviene o no hacer su compra o contratación de energía. La fuente [1] contiene los "
+        "indicadores oficiales de XM de los últimos 10 días (precio de bolsa, contratos, embalses, aportes, "
+        "demanda): es la base del informe y de la recomendación. Las demás fuentes son noticias recientes y "
+        "solo sirven de contexto.\n"
+        "   - Usa las cifras de [1] tal cual (mismos decimales) con su fecha. No uses precios, niveles ni "
+        "promedios mensuales de otras fuentes si [1] ya tiene un dato más reciente de la misma variable.\n"
+        "   - Habla del presente: últimos días y últimas semanas. Nada de historia del sector ni de meses "
+        "anteriores, salvo la comparación con el año anterior que trae [1].\n"
+        "   - El fenómeno de El Niño o el riesgo de racionamiento se mencionan como máximo en una frase y solo si "
+        "una fuente reciente lo respalda; el análisis debe salir de los datos de [1], no de titulares.\n"
+        "   - La recomendación es UNA de tres: 'Tomar ahora', 'Esperar' o 'Tomar solo una parte' (en este caso "
+        "indica qué porcentaje aproximado de la necesidad cubrir ahora y qué esperar para el resto). Debe ser "
+        "coherente con los datos: compara precio de bolsa con precio de contratos, tendencia reciente del precio (últimos 5 días frente a los anteriores), "
+        "nivel y tendencia de embalses, aportes frente a la media y crecimiento de la demanda.\n"
+        "Estructura Markdown obligatoria:\n"
+        f"# Señal de contratación de energía: {_fecha_hoy_txt()}\n"
+        "## Recomendación de hoy\n"
+        "<un párrafo de 90-120 palabras que empiece con la decisión en negrita (**Tomar ahora**, **Esperar** o "
+        "**Tomar solo una parte**), seguida de las 3 cifras que la justifican y el principal riesgo>\n"
+        "## Tablero del mercado\n"
+        "| Indicador | Último dato | Tendencia | Lectura para la compra |\n"
+        "|---|---|---|---|\n"
+        "(5 a 7 filas: precio de bolsa, precio de contratos, diferencia bolsa-contrato, embalses, aportes "
+        "hídricos, demanda y, si está en [1], compras en bolsa; en 'Último dato' la cifra con su fecha y la cita "
+        "[1]; en 'Tendencia' la variación de los últimos 5 días o la anual de [1]; en 'Lectura' 4-10 palabras: favorece contratar, "
+        "favorece esperar o neutral)\n"
+        "## Lectura del mercado\n"
+        "### Precio de bolsa frente a contratos\n<1-2 párrafos>\n"
+        "### Hidrología: embalses y aportes\n<1-2 párrafos>\n"
+        "### Demanda\n<1 párrafo>\n"
+        "### Contexto reciente\n<1 párrafo solo si las fuentes de contexto aportan algo publicado en las "
+        "últimas semanas (alertas de XM, medidas CREG); si no, omite esta subsección>\n"
+        "## Escenarios para las próximas semanas\n"
+        "- **Hidrología mejora:** <2-3 frases: qué señales de [1] lo indicarían (aportes por encima de cierto % "
+        "de la media, embalses subiendo), qué pasaría probablemente con el precio de bolsa frente al precio de "
+        "contratos y qué conviene hacer>\n"
+        "- **Se mantiene la situación actual:** <2-3 frases, igual>\n"
+        "- **Hidrología empeora:** <2-3 frases; usa el precio de escasez de activación de [1] como referencia de "
+        "techo y di qué tan lejos está hoy el precio de bolsa>\n"
+        "## Estrategia según el perfil\n"
+        "- **Comercializador con usuarios regulados:** <2-3 frases: qué porcentaje de la demanda cubrir, con qué "
+        "plazos de contrato (corto, mediano o largo) y cómo manejar la exposición a bolsa y el traslado a tarifa>\n"
+        "- **Comercializador de usuarios no regulados:** <2-3 frases, igual, considerando el precio de contratos "
+        "no regulados de [1]>\n"
+        "- **Gran consumidor (industria o comercio):** <2-3 frases: si negociar ya, por cuánto tiempo y qué "
+        "cláusulas o coberturas considerar>\n"
+        "## Recomendación y riesgos\n"
+        "- **Decisión:** <la misma del inicio, con horizonte y porcentaje a cubrir>\n"
+        "- **Por qué:** <3-4 frases con los datos clave>\n"
+        "- **Principal riesgo:** <2 frases>\n"
+        "- **Qué cambiaría la recomendación:** <señales concretas a vigilar con umbrales numéricos tomados de [1], "
+        "p. ej. precio de bolsa de los últimos 5 días o nivel de embalses>\n"
+        "LÓGICA DEL COMPRADOR (respétala en todo el informe): un precio de bolsa alto o subiendo, embalses "
+        "bajando o aportes bajo la media favorecen CONTRATAR más y antes; un precio de bolsa bajando hacia el "
+        "nivel de los contratos con hidrología mejorando favorece ESPERAR. Las señales de 'Qué cambiaría la "
+        "recomendación' deben seguir esta lógica (p. ej. si la bolsa repunta, se pasa a 'Tomar ahora'; si cae "
+        "y la hidrología mejora, a 'Esperar').\n"
+        "COHERENCIA: el porcentaje y el horizonte de la 'Decisión' son para el comprador típico (comercializador "
+        "con usuarios regulados); las estrategias por perfil pueden diferir, pero di explícitamente por qué.\n"
+        "PRECIO DE CONTRATOS: el de [1] es el promedio de los contratos vigentes que se liquidan hoy, no el "
+        "precio de una oferta nueva; acláralo una vez y advierte que un contrato nuevo puede negociarse por "
+        "encima de ese promedio mientras la bolsa siga alta.\n"
+        "Explica el porqué de cada lectura: no basta con repetir la cifra; di qué significa para quien compra "
+        "energía (costo, riesgo, oportunidad). Las secciones de escenarios y estrategia son análisis del "
+        "analista: pueden proponer porcentajes y umbrales, pero las cifras de mercado que mencionen deben ser las "
+        "de [1] con su cita.\n"
     )
 
 
@@ -588,7 +722,7 @@ _NUM_PALABRAS = {"dos": 2, "tres": 3, "cuatro": 4,
                  "cinco": 5, "seis": 6, "siete": 7, "ocho": 8, "nueve": 9, "diez": 10}
 _UNIDADES_LONGITUD = {"pagina", "paginas", "palabra", "palabras", "hoja", "hojas",
                       "parrafo", "parrafos", "linea", "minuto", "minutos", "anos", "meses",
-                      "dias", "horas", "por"}
+                      "dias", "horas", "por", "cosas"}
 _ADJ_ANTEPUESTOS = r"(?:principales|mejores|grandes|claves?|concretas?|concretos?|nuevas?|nuevos?|primeras?|primeros?)"
 
 
@@ -1175,9 +1309,8 @@ def _html_informe(cuerpo_md, titulo, prompt_usuario, correo_destino, fecha_txt,
     <td style="width: 15%;"><span class="lbl">Clasificación</span><br/><span class="val" style="color:#1e5a9a;">Confidencial</span></td>
   </tr></table>
 
-  <div class="q">
-    <span class="q-lbl">CONSULTA AL AGENTE</span><br/>{_esc(prompt_usuario)}
-  </div>
+  {f'<div class="q"><span class="q-lbl">CONSULTA AL AGENTE</span><br/>{_esc(prompt_usuario)}</div>'
+   if prompt_usuario else ""}
 
   <div class="contenido">
     {cuerpo_html}
@@ -1397,7 +1530,8 @@ import html as _html_mod
 import threading
 import time as _time
 from concurrent.futures import ThreadPoolExecutor
-from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode
+from datetime import timedelta
+from urllib.parse import urlparse, urlunparse, parse_qsl, urlencode, urljoin
 
 GROUNDED_MODEL = os.environ.get("GROUNDED_MODEL") or "gemini-3.1-pro-preview"
 # La investigación con búsqueda web usa un modelo rápido. La redacción sigue en GROUNDED_MODEL.
@@ -1417,7 +1551,14 @@ PALABRAS_RESERVA_FUENTES = int(os.environ.get("PALABRAS_RESERVA_FUENTES") or "50
 CREG_DOCS = "https://gestornormativo.creg.gov.co/gestor/entorno/docs/"
 CREG_NOVEDADES = ("https://gestornormativo.creg.gov.co/gestor/entorno/"
                   "novedades_regulacion_servicio_energia_electrica.html")
+CREG_CIRCULARES = "https://gestornormativo.creg.gov.co/gestor/entorno/novedades_circulares.html"
+UPME_RESOLUCIONES = "https://www.upme.gov.co/nosotros/biblioteca-juridica/resoluciones-upme/"
+CNO_ACUERDOS = "https://www.cno.org.co/acuerdos"
 XM_NOTICIAS = "https://www.xm.com.co/noticias"
+# Boletín regulatorio: días hacia atrás que cubre (nunca se amplía).
+VENTANA_NOVEDADES_DIAS = int(os.environ.get("VENTANA_NOVEDADES_DIAS") or "5")
+# Informe de decisión: antigüedad máxima de las noticias de contexto.
+VENTANA_CONTEXTO_DIAS = int(os.environ.get("VENTANA_CONTEXTO_DIAS") or "10")
 
 _HTTP_HEADERS = {
     "User-Agent": ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
@@ -1923,6 +2064,244 @@ def _noticias_xm(pregunta: str, paginas=5, maximo=4):
     return [(u, t) for _, u, t in cand[:maximo]]
 
 
+# ---------------------------- Publicaciones con fecha -----------------------
+def _fecha_texto_es(txt: str):
+    """'martes, 20 de octubre de 2026', '20/10/2026', '16 Octubre, 2026' -> date o None."""
+    t = _sin_acentos(txt or "")
+    m = re.search(r"(\d{1,2})\s+(?:de\s+)?([a-z]+),?\s+(?:de\s+)?(20\d{2})", t)
+    if m and m.group(2) in _MESES_NUM:
+        try:
+            return datetime(int(m.group(3)), _MESES_NUM[m.group(2)], int(m.group(1))).date()
+        except ValueError:
+            return None
+    m = re.search(r"(\d{1,2})/(\d{1,2})/(20\d{2})", t)
+    if m:
+        try:
+            return datetime(int(m.group(3)), int(m.group(2)), int(m.group(1))).date()
+        except ValueError:
+            return None
+    return None
+
+
+def _extracto_norma(texto: str, max_chars=6500) -> str:
+    """Encabezado (fechas, objeto) + final de los considerandos (por qué se expide) +
+    parte resolutiva (qué cambia para los agentes)."""
+    texto = re.sub(r"[ \t]+", " ", texto or "")
+    cab = texto[:1300]
+    m = re.search(r"\bRESUELVE\s*:?|\bDECRETA\s*:?|\bACUERDA\s*:?", texto)
+    if not m:
+        return texto[:max_chars].strip()
+    # Los últimos párrafos de los considerandos resumen el problema y la decisión.
+    motivos = texto[max(1300, m.start() - 1800):m.start()]
+    cuerpo = texto[m.start():m.start() + max_chars - len(cab) - len(motivos)]
+    return (cab + ("\n…\nMOTIVOS (final de los considerandos):\n" + motivos if motivos.strip() else "")
+            + "\n…\n" + cuerpo).strip()
+
+
+def _listado_creg(url: str, maximo: int):
+    info = _descargar(url, max_bytes=3_000_000, guardar_html=True)
+    if not info["ok"]:
+        return []
+    out = []
+    for m in re.finditer(r'<div[^>]+class="opcion-nueva"><a href="([^"]+)".*?class="id-documento">(.*?)</div>'
+                         r'.*?class="descripcion-documento">(.*?)</div>', info.get("html", ""), re.S):
+        ident = re.sub(r"\s+", " ", _html_mod.unescape(re.sub(r"<[^>]+>", " ", m.group(2)))).strip()
+        desc = re.sub(r"\s+", " ", _html_mod.unescape(re.sub(r"<[^>]+>", " ", m.group(3)))).strip()
+        # Autos y resoluciones particulares (50x: una sola empresa) no son novedades de interés general.
+        if re.match(r"Auto\b", ident) or re.search(r"Resoluci.n\s+50\d\s", ident):
+            continue
+        href = urljoin(url, _html_mod.unescape(m.group(1))).rstrip("/") + "/"
+        ident = re.sub(r"^(Proyecto de Resoluci.n|Resoluci.n|Circular)\s+", r"\1 CREG ",
+                       ident.replace(" CREG", "").strip())
+        out.append({"entidad": "CREG", "ident": ident, "objeto": desc, "url": href})
+        if len(out) >= maximo:
+            break
+    return out
+
+
+def _listado_upme():
+    info = _descargar(UPME_RESOLUCIONES, max_bytes=3_000_000, guardar_html=True)
+    if not info["ok"]:
+        return []
+    out = []
+    for m in re.finditer(r'class="bj-tarjeta-titulo">(.*?)</h3>(.*?)Fecha Publicaci.n:\s*([\d/]+)'
+                         r'.*?href="([^"]+)"', info.get("html", ""), re.S):
+        ident = _html_mod.unescape(re.sub(r"<[^>]+>|\s+", " ", m.group(1))).strip()
+        desc = re.sub(r"\s+", " ", _html_mod.unescape(re.sub(r"<[^>]+>", " ", m.group(2)))).strip()
+        # Anexos van con su resolución; las regalías mineras no son del sector eléctrico.
+        if ident.lower().startswith("anexo") or re.search(r"regal[ií]as|minerales|piedras", desc, re.I):
+            continue
+        out.append({"entidad": "UPME", "ident": re.sub(r"^(Resoluci.n|Circular)", r"\1 UPME", ident),
+                    "objeto": desc, "url": m.group(4), "fecha": _fecha_texto_es(m.group(3))})
+        if len(out) >= 25:
+            break
+    return out
+
+
+def _listado_cno():
+    info = _descargar(CNO_ACUERDOS, max_bytes=2_000_000, guardar_html=True)
+    if not info["ok"]:
+        return []
+    out, vistos = [], set()
+    for m in re.finditer(r'<h2>\s*(Acuerdo\s+(\d+)\b.*?)</h2>.*?<time datetime="(\d{4}-\d{2}-\d{2})',
+                         info.get("html", ""), re.S):
+        if m.group(2) in vistos:
+            continue
+        vistos.add(m.group(2))
+        titulo = re.sub(r"\s*-\s*Cloned\s*$", "", _html_mod.unescape(re.sub(r"\s+", " ", m.group(1)))).strip()
+        href = re.search(r'href="(/content/acuerdo-' + m.group(2) + r'[^"]*)"', info["html"])
+        out.append({"entidad": "CNO", "ident": f"Acuerdo CNO {m.group(2)}",
+                    "objeto": re.sub(r"^Acuerdo\s+\d+\s*", "", titulo),
+                    "url": urljoin(CNO_ACUERDOS, href.group(1)) if href else CNO_ACUERDOS,
+                    "fecha": datetime.strptime(m.group(3), "%Y-%m-%d").date()})
+    return out
+
+
+def _detalle_publicacion(p: dict) -> dict:
+    """Descarga el documento y completa fecha de publicación, plazo de comentarios y extracto."""
+    info = _descargar(p["url"])
+    texto = info.get("texto", "") if info.get("ok") else ""
+    p = dict(p, status=info.get("status"), url_final=info.get("url_final") or p["url"], texto=texto)
+    if p["entidad"] == "CREG":
+        m = re.search(r"Publicada en la WEB CREG el:\s*([^\n]{8,60})", texto)
+        p["fecha"] = _fecha_texto_es(m.group(1)) if m else None
+        m = re.search(r"Comentarios hasta el:\s*([^\n]{8,60})", texto)
+        p["comentarios_hasta"] = _fecha_texto_es(m.group(1)) if m else None
+    return p
+
+
+def publicaciones_recientes(dias=None):
+    """
+    Lo publicado por CREG (resoluciones, proyectos y circulares), UPME (resoluciones) y
+    CNO (acuerdos) en los últimos `dias` días (hoy incluido), con su fecha real de
+    publicación. La ventana no se amplía: si no hay nada, el boletín lo dice.
+    Devuelve (fuentes, desde, hasta).
+    """
+    t0 = _time.time()
+    hoy = _ahora_local()[0].date()
+    with ThreadPoolExecutor(max_workers=4) as ex:
+        f_nov = ex.submit(_listado_creg, CREG_NOVEDADES, 25)
+        f_cir = ex.submit(_listado_creg, CREG_CIRCULARES, 20)
+        f_upme = ex.submit(_listado_upme)
+        f_cno = ex.submit(_listado_cno)
+        creg = f_nov.result() + f_cir.result()
+        otras = f_upme.result() + f_cno.result()
+    if not creg and not otras:
+        raise RuntimeError("No se pudo leer ningún listado de CREG, UPME ni CNO (revisa conexión).")
+    vistas, unicas = set(), []
+    for p in creg:
+        clave = _sin_acentos(re.sub(r"\s+", "", p["ident"]))
+        if clave not in vistas:
+            vistas.add(clave)
+            unicas.append(p)
+    ventana = dias or VENTANA_NOVEDADES_DIAS
+    desde = hoy - timedelta(days=ventana - 1)
+    # UPME y CNO ya traen la fecha en el listado: solo se descarga lo que cae en la ventana.
+    unicas += [p for p in otras if p.get("fecha") and p["fecha"] >= desde]
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        detalladas = [p for p in ex.map(_detalle_publicacion, unicas) if p.get("fecha")]
+
+    elegidas = [p for p in detalladas if p["fecha"] >= desde]
+    orden_tipo = lambda p: (0 if re.match(r"Resoluci", p["ident"]) and p["entidad"] == "CREG" else  # noqa: E731
+                            1 if p["ident"].startswith("Proyecto") else
+                            2 if p["entidad"] != "CREG" else 3)
+    elegidas.sort(key=lambda p: (-p["fecha"].toordinal(), orden_tipo(p)))
+    elegidas = elegidas[:MAX_FUENTES_EVIDENCIA]
+
+    fuentes = []
+    for i, p in enumerate(elegidas, 1):
+        cabecera = (f"{p['ident']}\nOBJETO SEGÚN EL LISTADO OFICIAL: {p['objeto']}\n"
+                    f"FECHA DE PUBLICACIÓN: {p['fecha']:%d/%m/%Y}\n"
+                    + (f"COMENTARIOS HASTA: {p['comentarios_hasta']:%d/%m/%Y}\n" if p.get("comentarios_hasta") else ""))
+        extracto = cabecera + "TEXTO:\n" + _extracto_norma(p["texto"])
+        fuentes.append({
+            "id": i, "url": p["url"], "url_final": p["url_final"], "status": p.get("status"), "ok": True,
+            "titulo": f"{p['ident']}: {p['objeto'][:110]}", "texto": cabecera + p["texto"],
+            "extracto": extracto, "fecha": p["fecha"].isoformat(), "origen": "semilla", "notas": [],
+            "tipo": "oficial", "enlace": _estado_enlace(p), "entidad_pub": p["entidad"],
+            "ident": p["ident"], "comentarios_hasta": p.get("comentarios_hasta"),
+        })
+    por_ent = {e: sum(1 for f in fuentes if f["entidad_pub"] == e) for e in ("CREG", "UPME", "CNO")}
+    _log(f"   Publicaciones del {desde:%d/%m} al {hoy:%d/%m/%Y}: {len(fuentes)} "
+         f"(CREG {por_ent['CREG']}, UPME {por_ent['UPME']}, CNO {por_ent['CNO']}) · {round(_time.time() - t0)} s")
+    for f in fuentes:
+        _log(f"     [{f['id']}] {f['fecha']} {f['titulo'][:110]}")
+    return fuentes, desde, hoy
+
+
+# ---------------------------- Tipos de informe ------------------------------
+# regulatorio: boletín de lo publicado por CREG, UPME y CNO en la última semana.
+# decision: señal de compra/contratación de energía con los datos XM más recientes.
+# general: cualquier otra pregunta (flujo de investigación abierto).
+TIPOS_INFORME = ("auto", "regulatorio", "decision", "general")
+
+
+def tipo_informe(pregunta: str, tipo: str = "") -> str:
+    tipo = (tipo or os.environ.get("TIPO_INFORME") or "auto").strip().lower()
+    if tipo in TIPOS_INFORME and tipo != "auto":
+        return tipo
+    t = _sin_acentos(pregunta)
+    if (re.search(r"novedad|noticia|boletin|actualizacion|ultim[oa]s? (dias|semana)", t)
+            and re.search(r"creg|upme|\bcno\b|resoluc|circular|regulat|normativ", t)):
+        return "regulatorio"
+    if re.search(r"compra|contrat|cubrir|cobertura", t) and re.search(r"bolsa|embalse|aporte|demanda", t):
+        return "decision"
+    return "general"
+
+
+def evidencia_decision():
+    """Fuente [1]: indicadores XM de los últimos 10 días (API). Después, solo noticias y
+    alertas publicadas en los últimos VENTANA_CONTEXTO_DIAS días, como contexto."""
+    hoy = _ahora_local()[0].date()
+    limite = hoy - timedelta(days=VENTANA_CONTEXTO_DIAS)
+    meses = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+             "septiembre", "octubre", "noviembre", "diciembre")
+    consulta = (f"Noticias, alertas de XM y medidas de la CREG o del Ministerio de Minas y Energía publicadas "
+                f"desde el {limite.day} de {meses[limite.month - 1]} de {limite.year} que afecten el precio "
+                "de la energía en bolsa, los precios de los contratos o la confiabilidad del sistema eléctrico "
+                "colombiano. Descarta todo lo publicado antes de esa fecha.")
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        fut_xm = ex.submit(resumen_mercado, hoy) if resumen_mercado else None
+        fut_ctx = ex.submit(recopilar_evidencia, consulta)
+        try:
+            xm = fut_xm.result() if fut_xm else None
+        except Exception as exc:
+            _log(f"   Datos XM no disponibles: {type(exc).__name__}: {exc}")
+            xm = None
+        try:
+            contexto = fut_ctx.result()
+        except Exception as exc:
+            _log(f"   Contexto de noticias omitido: {type(exc).__name__}: {exc}")
+            contexto = []
+
+    recientes = []
+    for f in contexto:
+        if f.get("origen") == "norma":
+            continue          # el texto de una norma no dice cómo está el mercado hoy
+        try:
+            fecha = datetime.strptime(f.get("fecha") or "", "%Y-%m-%d").date()
+        except ValueError:
+            fecha = None
+        if fecha is None or fecha < limite:
+            continue          # sin fecha verificable o anterior a la ventana: no es contexto actual
+        recientes.append(f)
+    recientes.sort(key=lambda f: f["fecha"], reverse=True)
+    fuentes = []
+    if xm:
+        fuentes.append({
+            "id": 1, "url": "https://sinergox.xm.com.co", "url_final": "https://sinergox.xm.com.co",
+            "status": 200, "ok": True, "titulo": "XM – Sinergox: indicadores del mercado mayorista (API pública)",
+            "texto": xm["texto"], "extracto": xm["texto"], "fecha": hoy.isoformat(), "origen": "semilla",
+            "notas": [], "tipo": "oficial", "enlace": "activo",
+        })
+        _log(f"   Datos XM hasta {xm['hasta']:%d/%m/%Y} incorporados como fuente [1].")
+    for f in recientes[:MAX_FUENTES_EVIDENCIA - len(fuentes)]:
+        fuentes.append(dict(f, id=len(fuentes) + 1))
+    _log(f"   Contexto: {len(recientes)} fuente(s) publicadas desde el {limite:%d/%m/%Y} "
+         f"({len(contexto) - len(recientes)} descartadas por antigüedad o sin fecha).")
+    return fuentes
+
+
 # ---------------------------- Investigación ---------------------------------
 def _fecha_hoy_txt():
     meses = ("enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
@@ -2220,7 +2599,7 @@ def _bloque_evidencia(fuentes) -> str:
 
 
 # ---------------------------- Redacción con citas ---------------------------
-def construir_prompt_redaccion(pregunta, fuentes, max_pages=None, borrador="") -> str:
+def construir_prompt_redaccion(pregunta, fuentes, max_pages=None, borrador="", estructura="") -> str:
     reglas = (
         f"Eres analista senior del mercado eléctrico colombiano en Enersinc. FECHA ACTUAL: {_fecha_hoy_txt()}.\n"
         "Redacta el informe que responde la PREGUNTA usando EXCLUSIVAMENTE la EVIDENCIA numerada de abajo.\n\n"
@@ -2257,7 +2636,7 @@ def construir_prompt_redaccion(pregunta, fuentes, max_pages=None, borrador="") -
         f"i) Usa como máximo {MAX_FUENTES_INFORME} fuentes distintas. No incluyas sección de fuentes ni bibliografía "
         "(el sistema la agrega).\n\n"
     )
-    formato = construir_prompt_agente(pregunta, max_pages, grounded=True)
+    formato = construir_prompt_agente(pregunta, max_pages, grounded=True, estructura=estructura)
     return (
         reglas + formato
         + ("\nBORRADOR PREVIO DEL AGENTE (NO es fuente; úsalo solo como guía de temas y "
@@ -2336,6 +2715,8 @@ def _numeros_verificables(frase: str):
     limpio = _RE_CITA.sub(" ", frase)
     limpio = _unir_miles(limpio)
     limpio = re.sub(r"https?://\S+", " ", limpio)
+    # Fechas dd/mm/aaaa: la fuente suele escribirlas en palabras; su periodo se revisa aparte.
+    limpio = re.sub(r"\b\d{1,2}/\d{1,2}(?:/\d{2,4})?\b", " ", limpio)
     nums = []
     for tok in _DIGITOS_VERIF.findall(limpio):
         dig = re.sub(r"\D", "", tok)
@@ -2411,12 +2792,19 @@ def validar_informe(texto_md: str, fuentes, verificar_numeros=True):
             if _RE_NO_VERIF.search(fr):
                 stats["no_verificados"] += 1
                 continue
+            # En el cierre de recomendación los porcentajes a cubrir y los umbrales son propuestas
+            # del analista, no datos de una fuente.
+            propuesta = bool(re.search(r"^(recomendacion(es)?( y riesgos)?|escenarios\b.*|estrategia\b.*)$",
+                                       _seccion_de(lineas, i).strip()))
+            # La frase de decisión al inicio del informe también es una propuesta (sin cita),
+            # pero las cifras citadas de esa sección sí se verifican.
+            opinion = propuesta or _seccion_de(lineas, i).strip() == "recomendacion de hoy"
             motivo = ""
             if invalidas and not validas:
                 motivo = f"cita inexistente {invalidas}"
             elif not validas:
-                motivo = "dato sin cita"
-            elif verificar_numeros:
+                motivo = "" if opinion else "dato sin cita"
+            elif verificar_numeros and not propuesta:
                 faltan = []
                 terms = [t for t in _terminos(_RE_CITA.sub(" ", fr)) if not t.isdigit()]
                 for tok in _numeros_verificables(fr):
@@ -2440,6 +2828,9 @@ def validar_informe(texto_md: str, fuentes, verificar_numeros=True):
                     r"\s+(?:de\s+|del\s+)?(20\d{2})", _sin_acentos(fr), re.I)]
                 proyeccion = bool(re.search(r"proyect|proyecc|estim|preve|prevision|pronostic|se espera|podria|"
                                             r"caera|llegara|alcanzara|sera\b|esperad|escenario", _sin_acentos(fr)))
+                hoy_d = _ahora_local()[0].date()
+                # Un mes futuro es un plazo o una entrada en vigor, no un dato viejo mal fechado.
+                periodos = [(a, m) for a, m in periodos if (a, m) <= (hoy_d.year, hoy_d.month)]
                 if periodos and fechas and all(fechas) and not proyeccion:
                     a, m = max(periodos)
                     if max(fechas) < f"{a:04d}-{m:02d}-01":
@@ -2480,6 +2871,42 @@ def _marcar_no_verificado(texto_md: str, problemas) -> str:
         cuerpo = nueva[:m.start()] if m else nueva
         nueva = cuerpo.rstrip() + " *(no verificado)*" + (m.group(1) if m else "")
         lineas[i] = lineas[i].replace(frase, nueva, 1)
+    return "\n".join(lineas)
+
+
+def _citar_por_documento(texto_md: str, fuentes) -> str:
+    """Boletín regulatorio: cada fuente es un documento con número propio. A una frase sin
+    cita se le pone la del documento que nombra o, si no nombra ninguno, la del documento
+    del título ### en que está. La validación posterior sigue comprobando sus cifras."""
+    def _numero(f):
+        m = re.search(r"(\d{3} \d{3}|\d{2,4})(?: de 20\d{2})?$", re.sub(r"\s+", " ", f.get("ident", "")))
+        return m.group(1) if m else ""
+    numeros = [(f["id"], _numero(f)) for f in fuentes if _numero(f)]
+
+    def _nombrados(txt):
+        return [i for i, n in numeros if re.search(r"(?<!\d)(?<!\d )" + re.escape(n) + r"(?! ?\d)", txt)]
+
+    lineas, actual = texto_md.splitlines(), None
+    for k, linea in enumerate(lineas):
+        st = linea.strip()
+        if re.match(r"^#{1,2}\s", st):
+            actual = None
+            continue
+        if re.match(r"^###\s", st):
+            ids = _nombrados(st)
+            actual = ids[0] if len(ids) == 1 else None
+            continue
+        nueva = linea
+        for fr in _frases(linea):
+            if _RE_CITA.search(fr) or not _RE_MARCADOR.search(fr):
+                continue
+            ids = _nombrados(fr) or ([actual] if actual else [])
+            if not ids:
+                continue
+            m = re.search(r"([.;:]?)\s*$", fr)
+            nueva = nueva.replace(fr, fr[:m.start()].rstrip() + " " + "".join(f"[{i}]" for i in ids[:3])
+                                  + fr[m.start():], 1)
+        lineas[k] = nueva
     return "\n".join(lineas)
 
 
@@ -2627,19 +3054,40 @@ def _variables_faltantes(pregunta, texto_md, fuentes):
     return out
 
 
-def generar_informe_con_fuentes(pregunta: str, max_pages=None, borrador: str = ""):
+def generar_informe_con_fuentes(pregunta: str, max_pages=None, borrador: str = "", tipo: str = "general"):
     """Investigación -> redacción con citas -> validación (+1 corrección) -> marcas.
     Devuelve (texto_md_sin_fuentes, fuentes_citadas, stats)."""
     t0 = _time.time()
-    _log("   a) Investigando fuentes oficiales y verificables…")
-    fuentes = recopilar_evidencia(pregunta, borrador)
+    estructura = ""
+    if tipo == "regulatorio":
+        _log(f"   a) Leyendo lo publicado por CREG, UPME y CNO en los últimos {VENTANA_NOVEDADES_DIAS} días…")
+        fuentes, desde, hasta = publicaciones_recientes()
+        if not fuentes:
+            # Ventana sin publicaciones: se informa así, sin rellenar con normas anteriores.
+            texto = (f"# Novedades regulatorias del sector energético: {desde:%d/%m} al {hasta:%d/%m/%Y}\n\n"
+                     "## Resumen\n\n"
+                     f"Entre el {_fecha_larga(desde)} y el {_fecha_larga(hasta)}, la CREG, la UPME y el CNO no "
+                     "publicaron resoluciones, proyectos de resolución, circulares ni acuerdos nuevos en sus "
+                     "listados oficiales. No hay plazos nuevos que atender en este periodo.\n")
+            _log("   Sin publicaciones en la ventana: se envía el boletín indicándolo.")
+            return texto, [], validar_informe(texto, [])["stats"]
+        estructura = _estructura_regulatorio(desde, hasta)
+    elif tipo == "decision":
+        _log("   a) Indicadores XM de los últimos 10 días + contexto reciente…")
+        fuentes = evidencia_decision()
+        estructura = _estructura_decision()
+    else:
+        _log("   a) Investigando fuentes oficiales y verificables…")
+        fuentes = recopilar_evidencia(pregunta, borrador)
     if not fuentes:
         raise RuntimeError("No se encontró ninguna fuente verificable (revisa conexión / Vertex AI).")
-    _log(f"   b) Redactando con citas ({GROUNDED_MODEL})…")
-    prompt = construir_prompt_redaccion(pregunta, fuentes, max_pages, borrador)
+    _log(f"   b) Redactando con citas ({GROUNDED_MODEL}) · informe {tipo}…")
+    prompt = construir_prompt_redaccion(pregunta, fuentes, max_pages, borrador, estructura)
     texto = _quitar_seccion_fuentes(_limpiar_respuesta(_texto_respuesta_llm(_llm(prompt)).strip()))
     if not texto:
         raise RuntimeError("El modelo no devolvió texto en la redacción.")
+    if tipo == "regulatorio":
+        texto = _citar_por_documento(_normalizar_citas(texto), fuentes)
     val = validar_informe(texto, fuentes)
     objetivo, minimo, _maximo = _presupuesto_palabras(max_pages, grounded=True)
     extra = [f"falta: {p}" for p in _verificar_conteos(pregunta, val["texto"])]
@@ -2881,8 +3329,10 @@ def _presentacion_correo(prompt: str, titulo: str, texto_md: str = "", con_grafi
             "colombiano. Tono cordial, profesional y en usted; debe despertar interés por leer "
             "el informe completo.\n"
             "Devuelve SOLO un JSON con dos claves:\n"
-            '- "gancho": frase de máximo 70 caracteres con el hallazgo o la conclusión más '
-            "relevante para este lector (irá en el asunto).\n"
+            '- "gancho": frase de máximo 70 caracteres con la conclusión principal del informe '
+            "(la recomendación de compra o la novedad regulatoria más importante); irá en el asunto. "
+            "No uses el fenómeno de El Niño ni el riesgo de racionamiento como gancho. Escribe en "
+            "tercera persona: Enersinc no expide normas (nada de 'simplificamos' ni 'aprobamos').\n"
             '- "parrafos": lista de 2 párrafos breves (máximo 45 palabras cada uno). El primero '
             "presenta lo más importante que encontrará; el segundo anticipa qué decisión o "
             "recomendación trae el informe sin revelarla del todo.\n"
@@ -3000,7 +3450,7 @@ def enviar_correo(destinatario, ruta_pdf, prompt, titulo, texto_md="", con_grafi
 
 
 def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password_app="",
-                            enviar=True, max_pages=None, texto_md=None, con_graficas=True):
+                            enviar=True, max_pages=None, texto_md=None, con_graficas=True, tipo=""):
     """
     Flujo: investigación con fuentes -> redacción con citas [n] -> validación ->
     PDF confidencial (~N páginas, con bloque Referencias) -> BD -> correo (opcional).
@@ -3026,6 +3476,9 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
     _ensure_dirs()
     ahora, _ = _ahora_local()
     timestamp_archivo = ahora.strftime("%Y%m%d_%H%M%S")
+    tipo = tipo_informe(prompt, tipo)
+    if tipo == "regulatorio":
+        con_graficas = False      # el boletín normativo no lleva series de mercado
 
     # Las gráficas salen solo de la pregunta y se bajan en paralelo con la
     # investigación, así el PDF no espera segundos extra al final.
@@ -3044,8 +3497,10 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
         print(f"\n1. Informe con fuentes verificables · backend {AGENT_BACKEND} · "
               f"máx. {max_pages} página(s)...")
         print(f"   Pregunta: '{prompt}'")
+        print(f"   Tipo de informe: {tipo}")
         borrador = ""
-        if AGENT_BACKEND != "local":
+        # El borrador del agente CES traía contexto viejo; los informes programados no lo usan.
+        if AGENT_BACKEND != "local" and tipo == "general":
             try:
                 print(f"   Borrador orientativo del agente ({AGENT_BACKEND})...")
                 borrador = extraer_texto_respuesta(
@@ -3055,7 +3510,7 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
             except Exception as exc:
                 print(f"   Borrador omitido ({exc}); se continúa solo con la investigación.")
                 borrador = ""
-        texto_respuesta, fuentes, stats = generar_informe_con_fuentes(prompt, max_pages, borrador)
+        texto_respuesta, fuentes, stats = generar_informe_con_fuentes(prompt, max_pages, borrador, tipo)
         print(f"   Palabras del informe: {_contar_palabras(texto_respuesta)}")
     else:
         print("\n1. Usando markdown existente (se revalidan citas y enlaces)...")
@@ -3128,8 +3583,9 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
 
     print(f"2. Generando PDF confidencial N.º {numero} ({max_pages} página(s) máx.)...")
     try:
+        # Los informes programados no muestran la instrucción que los genera.
         info = markdown_a_pdf(
-            texto_respuesta, titulo_reporte, prompt, correo_destino, str(ruta_pdf),
+            texto_respuesta, titulo_reporte, prompt if tipo == "general" else "", correo_destino, str(ruta_pdf),
             max_pages=max_pages,
             referencia=f"ENR-{numero}-" + timestamp_archivo.replace("_", "-"),
             fuentes=fuentes, verificacion=verificacion, graficas=graficas,
@@ -3213,6 +3669,11 @@ if __name__ == "__main__":
                          "oficiales + Gemini en Vertex. ces / adk: añaden un borrador orientativo del "
                          "Agente Documentacion (CES) o de agent.py. En todos los casos el informe "
                          "lleva citas [n] y bloque de Fuentes verificadas.")
+    ap.add_argument("--tipo", choices=list(TIPOS_INFORME), default="",
+                    help="regulatorio: boletín de lo publicado por CREG/UPME/CNO en la última semana. "
+                         "decision: señal de compra de energía con los datos XM más recientes. "
+                         "general: investigación abierta. auto (default): se deduce de la pregunta. "
+                         "También TIPO_INFORME")
     ap.add_argument("--renumerar", action="store_true",
                     help="Renombra los PDFs existentes a NNNN_Reporte_<fecha>.pdf según su ID y sale")
     args = ap.parse_args()
@@ -3266,7 +3727,13 @@ if __name__ == "__main__":
     print(f"Páginas: {paginas}")
     con_graficas = not args.sin_graficas and (
         os.environ.get("GRAFICAS", "1").strip().lower() not in {"0", "false", "no"})
-    if con_graficas and temas_detectados:
+    tipo = tipo_informe(PREGUNTA, args.tipo)
+    print(f"Tipo de informe: {tipo}")
+    if tipo == "regulatorio":
+        con_graficas = False
+    elif tipo == "decision" and con_graficas and temas_detectados:
+        print("Sinergox: sí, gráficas de precio, embalses, aportes y demanda")
+    elif con_graficas and temas_detectados:
         series = temas_detectados(PREGUNTA)
         if series:
             print(f"Sinergox: sí, gráficas de {', '.join(series)}")
@@ -3281,4 +3748,4 @@ if __name__ == "__main__":
 
     ejecutar_flujo_completo(PREGUNTA, CORREO, enviar=enviar,
                             max_pages=paginas, texto_md=texto_md,
-                            con_graficas=con_graficas)
+                            con_graficas=con_graficas, tipo=tipo)

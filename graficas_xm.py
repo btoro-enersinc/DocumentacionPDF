@@ -23,7 +23,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 import requests  # noqa: E402
 
 API_XM = "https://servapibi.xm.com.co"
-DIAS_VENTANA = 30
+DIAS_VENTANA = 10   # los informes solo usan datos de los últimos 10 días
 MAX_GRAFICAS = 4
 TIMEOUT_S = 18
 DPI = 150
@@ -56,7 +56,10 @@ def _cache_path(periodo: str, metrica: str, entidad: str, ini: date, fin: date) 
 def _consultar(periodo: str, metrica: str, entidad: str, ini: date, fin: date):
     CACHE_DIR.mkdir(parents=True, exist_ok=True)
     path = _cache_path(periodo, metrica, entidad, ini, fin)
-    if path.is_file():
+    # XM corrige y completa los últimos días: solo se reutilizan ventanas ya cerradas
+    # (p. ej. el año anterior); lo reciente se consulta siempre en vivo.
+    cacheable = fin < date.today() - timedelta(days=10)
+    if cacheable and path.is_file():
         try:
             return json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError):
@@ -69,10 +72,11 @@ def _consultar(periodo: str, metrica: str, entidad: str, ini: date, fin: date):
     )
     r.raise_for_status()
     items = r.json().get("Items") or []
-    try:
-        path.write_text(json.dumps(items), encoding="utf-8")
-    except OSError:
-        pass
+    if cacheable:
+        try:
+            path.write_text(json.dumps(items), encoding="utf-8")
+        except OSError:
+            pass
     return items
 
 
@@ -116,7 +120,7 @@ def _estilo(ax, titulo: str, unidad: str):
     ax.set_ylabel(unidad, fontsize=7.5, color=GRIS)
     ax.tick_params(labelsize=7, colors=GRIS, length=2)
     ax.xaxis.set_major_formatter(mdates.DateFormatter("%d/%m"))
-    ax.xaxis.set_major_locator(mdates.DayLocator(interval=5))
+    ax.xaxis.set_major_locator(mdates.DayLocator(interval=1))
     ax.grid(axis="y", color="#e2e8f0", linewidth=0.6)
     for lado in ("top", "right"):
         ax.spines[lado].set_visible(False)
@@ -218,6 +222,190 @@ _CATALOGO = (
     ("demanda", re.compile(r"\bdemanda\b"),
      _datos_demanda, _dibujar_demanda, "demanda", "Demanda"),
 )
+
+
+# --------------------------- Resumen numérico --------------------------------
+def _prom(serie):
+    return sum(v for _, v in serie) / len(serie) if serie else None
+
+
+def _entre(serie, ini: date, fin: date):
+    return [(f, v) for f, v in serie if ini <= f <= fin]
+
+
+def _valor_en(serie, dia: date, tolerancia: int = 3):
+    """Valor del día pedido o del más cercano anterior (hasta `tolerancia` días)."""
+    por_dia = dict(serie)
+    for k in range(tolerancia + 1):
+        d = dia - timedelta(days=k)
+        if d in por_dia:
+            return d, por_dia[d]
+    return None, None
+
+
+def _fmt(v, dec=1):
+    return "s/d" if v is None else f"{v:.{dec}f}"
+
+
+def _var(a, b):
+    return None if a is None or not b else (a / b - 1) * 100
+
+
+def resumen_mercado(hoy: date = None):
+    """
+    Indicadores del mercado mayorista con datos de la API de XM (últimos DIAS_VENTANA días y
+    las mismas fechas del año anterior como referencia). Devuelve dict con `texto` (tabla legible que
+    el informe usa como evidencia oficial), `hasta` (último día con datos) o None.
+    """
+    hoy = hoy or date.today()
+    fin = hoy - timedelta(days=1)
+    ini = fin - timedelta(days=DIAS_VENTANA - 1)
+    ini_a, fin_a = ini - timedelta(days=365), fin - timedelta(days=365)
+    tareas = {
+        "bolsa": (serie_horaria_agregada, "PrecBolsNaci", ini, fin, "promedio"),
+        "bolsa_a": (serie_horaria_agregada, "PrecBolsNaci", ini_a, fin_a, "promedio"),
+        "escasez": (serie_diaria, "PrecEscaAct", ini, fin),
+        "contrato": (serie_diaria, "PrecPromCont", ini, fin),
+        "cont_reg": (serie_horaria_agregada, "PrecPromContRegu", ini, fin, "promedio"),
+        "cont_noreg": (serie_horaria_agregada, "PrecPromContNoRegu", ini, fin, "promedio"),
+        "comp_bolsa": (serie_horaria_agregada, "CompBolsNaciEner", ini, fin, "suma", 1e-6),
+        "comp_cont": (serie_horaria_agregada, "CompContEner", ini, fin, "suma", 1e-6),
+        "embalse": (serie_diaria, "PorcVoluUtilDiar", ini, fin, 100.0),
+        "embalse_a": (serie_diaria, "PorcVoluUtilDiar", ini_a, fin_a, 100.0),
+        "aportes": (serie_diaria, "AporEner", ini, fin, 1e-6),
+        "media": (serie_diaria, "AporEnerMediHist", ini, fin, 1e-6),
+        "demanda": (serie_horaria_agregada, "DemaReal", ini, fin, "suma", 1e-6),
+        "demanda_a": (serie_horaria_agregada, "DemaReal", ini_a, fin_a, "suma", 1e-6),
+        "potencia": (serie_diaria, "DemaMaxPot", ini, fin, 1e-3),
+    }
+
+    def _cargar(item):
+        clave, (fn, *args) = item
+        try:
+            return clave, fn(*args)
+        except (requests.RequestException, ValueError, KeyError):
+            return clave, []
+
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        s = dict(ex.map(_cargar, tareas.items()))
+    s["demanda"], _ = _sin_preliminares(s["demanda"])
+    if not (s["bolsa"] or s["embalse"] or s["demanda"]):
+        return None
+
+    lineas = []
+    ultimo_dia = max(f for k in ("bolsa", "embalse", "aportes", "demanda") for f, _ in s[k] or [(ini, 0)])
+
+    # Precio de bolsa
+    if s["bolsa"]:
+        f_ult, v_ult = s["bolsa"][-1]
+        u7 = s["bolsa"][-5:]
+        p7 = s["bolsa"][:-5]
+        fechas = {f for f, _ in s["bolsa"]}
+        pa = _prom([(f, v) for f, v in s["bolsa_a"] if f + timedelta(days=365) in fechas])
+        lineas += [
+            "PRECIO DE BOLSA NACIONAL (promedio diario, COP/kWh):",
+            f"- Último día con dato ({f_ult:%d/%m/%Y}): {_fmt(v_ult)} COP/kWh",
+            f"- Promedio últimos 5 días ({u7[0][0]:%d/%m}–{u7[-1][0]:%d/%m/%Y}): {_fmt(_prom(u7))} COP/kWh",
+            f"- Promedio de los días anteriores de la ventana: {_fmt(_prom(p7))} COP/kWh "
+            f"(variación frente a esos días {_fmt(_var(_prom(u7), _prom(p7)))} %)",
+            f"- Promedio últimos {len(s['bolsa'])} días ({s['bolsa'][0][0]:%d/%m}–{f_ult:%d/%m/%Y}): "
+            f"{_fmt(_prom(s['bolsa']))} COP/kWh; mínimo {_fmt(min(v for _, v in s['bolsa']))}, "
+            f"máximo {_fmt(max(v for _, v in s['bolsa']))}",
+        ]
+        if pa:
+            lineas.append(f"- Mismas fechas del año anterior ({s['bolsa'][0][0] - timedelta(days=365):%d/%m/%Y}–"
+                          f"{f_ult - timedelta(days=365):%d/%m/%Y}): "
+                          f"{_fmt(pa)} COP/kWh (variación anual {_fmt(_var(_prom(s['bolsa']), pa))} %)")
+    if s["bolsa"] and len(s["bolsa"]) > 2:
+        media = _prom(s["bolsa"])
+        desv = (sum((v - media) ** 2 for _, v in s["bolsa"]) / (len(s["bolsa"]) - 1)) ** 0.5
+        lineas.append(f"- Volatilidad: desviación estándar del precio diario en el periodo {_fmt(desv)} COP/kWh "
+                      f"({_fmt(desv / media * 100)} % del promedio)")
+    if s["escasez"]:
+        esc = s["escasez"][-1][1]
+        lineas.append(f"- Precio de escasez de activación vigente ({s['escasez'][-1][0]:%d/%m/%Y}): "
+                      f"{_fmt(esc)} COP/kWh")
+        if s["bolsa"]:
+            sobre = sum(1 for _, v in s["bolsa"] if v > esc)
+            lineas.append(f"- Días del periodo con precio de bolsa por encima del precio de escasez de activación: "
+                          f"{sobre} de {len(s['bolsa'])}; el último precio diario equivale al "
+                          f"{_fmt(s['bolsa'][-1][1] / esc * 100)} % del precio de escasez")
+
+    # Contratos y exposición
+    if s["contrato"] or s["cont_reg"]:
+        lineas.append("PRECIO PROMEDIO DE CONTRATOS (COP/kWh):")
+        for clave, nombre in (("contrato", "Total contratos"), ("cont_reg", "Mercado regulado"),
+                              ("cont_noreg", "Mercado no regulado")):
+            if s[clave]:
+                lineas.append(f"- {nombre}: último dato ({s[clave][-1][0]:%d/%m/%Y}) {_fmt(s[clave][-1][1])}; "
+                              f"promedio últimos 5 días {_fmt(_prom(s[clave][-5:]))}")
+        if s["bolsa"] and s["contrato"]:
+            dif = _prom(s["bolsa"][-5:]) - _prom(s["contrato"][-5:])
+            lineas.append(f"- Diferencia bolsa menos contrato (promedio últimos 5 días): {_fmt(dif)} COP/kWh; "
+                          f"la bolsa está {_fmt(_var(_prom(s['bolsa'][-5:]), _prom(s['contrato'][-5:])))} % "
+                          "por encima del precio promedio de contratos")
+    if s["comp_bolsa"] and s["comp_cont"]:
+        b7 = sum(v for _, v in s["comp_bolsa"][-5:])
+        c7 = sum(v for _, v in s["comp_cont"][-5:])
+        if b7 + c7:
+            lineas.append(f"- Compras en bolsa como porcentaje de las compras totales del sistema "
+                          f"(bolsa + contratos, últimos 5 días): {_fmt(b7 / (b7 + c7) * 100)} %")
+
+    # Embalses
+    if s["embalse"]:
+        f_ult, v_ult = s["embalse"][-1]
+        f7, v7 = _valor_en(s["embalse"], f_ult - timedelta(days=5))
+        f30, v30 = s["embalse"][0]
+        fa, va = _valor_en(s["embalse_a"], f_ult - timedelta(days=365))
+        lineas += [
+            "EMBALSES DEL SIN (volumen útil, % de la capacidad útil):",
+            f"- {f_ult:%d/%m/%Y}: {_fmt(v_ult, 2)} %",
+        ]
+        if v7 is not None:
+            lineas.append(f"- {f7:%d/%m/%Y}: {_fmt(v7, 2)} % (cambio en 5 días {_fmt(v_ult - v7, 2)} puntos)")
+        lineas.append(f"- {f30:%d/%m/%Y}: {_fmt(v30, 2)} % (cambio en los últimos 10 días {_fmt(v_ult - v30, 2)} puntos)")
+        if va is not None:
+            lineas.append(f"- Mismo día del año anterior ({fa:%d/%m/%Y}): {_fmt(va, 2)} % "
+                          f"(diferencia {_fmt(v_ult - va, 2)} puntos)")
+
+    # Aportes
+    if s["aportes"] and s["media"]:
+        media = dict(s["media"])
+        par = [(f, v, media[f]) for f, v in s["aportes"] if media.get(f)]
+        if par:
+            def _pct(trozo):
+                return sum(v for _, v, _ in trozo) / sum(m for _, _, m in trozo) * 100
+            lineas += [
+                "APORTES HÍDRICOS AL SIN (energía, % de la media histórica):",
+                f"- Último día ({par[-1][0]:%d/%m/%Y}): {_fmt(par[-1][1])} GWh, {_fmt(_pct(par[-1:]))} % de la media",
+                f"- Últimos 5 días: {_fmt(_pct(par[-5:]))} % de la media histórica",
+                f"- Últimos {len(par)} días: {_fmt(_pct(par))} % de la media histórica",
+            ]
+
+    # Demanda
+    if s["demanda"]:
+        f_ult, v_ult = s["demanda"][-1]
+        u7 = s["demanda"][-5:]
+        ant = dict(s["demanda_a"])
+        par_a = [(v, ant.get(f - timedelta(days=364))) for f, v in u7]   # mismo día de la semana
+        par_a = [(v, a) for v, a in par_a if a]
+        lineas += [
+            "DEMANDA REAL DE ENERGÍA DEL SIN (GWh/día):",
+            f"- Último día completo ({f_ult:%d/%m/%Y}): {_fmt(v_ult, 2)} GWh",
+            f"- Promedio últimos 5 días ({u7[0][0]:%d/%m}–{f_ult:%d/%m/%Y}): {_fmt(_prom(u7), 2)} GWh/día",
+            f"- Máximo de los últimos {len(s['demanda'])} días: {_fmt(max(v for _, v in s['demanda']), 2)} GWh",
+        ]
+        if par_a:
+            lineas.append(f"- Variación de los últimos 5 días frente a los mismos días de la semana del año "
+                          f"anterior: {_fmt(_var(sum(v for v, _ in par_a), sum(a for _, a in par_a)))} %")
+    if s["potencia"] and s["potencia"][-1][0] >= fin - timedelta(days=10):   # XM la publica con rezago
+        f_max, v_max = max(s["potencia"], key=lambda x: x[1])
+        lineas.append(f"- Demanda máxima de potencia: último dato ({s['potencia'][-1][0]:%d/%m/%Y}) "
+                      f"{_fmt(s['potencia'][-1][1], 0)} MW; máximo del periodo {_fmt(v_max, 0)} MW ({f_max:%d/%m/%Y})")
+
+    encabezado = (f"Datos oficiales de XM (API pública de Sinergox, servapibi.xm.com.co) consultados el "
+                  f"{hoy:%d/%m/%Y}. Cifras calculadas por Enersinc a partir de las series diarias.")
+    return {"texto": encabezado + "\n" + "\n".join(lineas), "hasta": ultimo_dia, "desde": ini}
 
 
 def temas_detectados(pregunta: str):

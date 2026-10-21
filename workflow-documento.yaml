@@ -1,6 +1,6 @@
 # Cloud Workflows: workflow-documento (us-west1, proyecto automatizaciones-ia-20260420).
 # Desplegar: gcloud workflows deploy workflow-documento --location=us-west1 --source=workflow-documento.yaml
-# Entrada: {"prompt": "...", "email": "destino@correo.com", "paginas": 2}
+# Entrada: {"prompt": "...", "email": "destino@correo.com", "paginas": 2, "tipo": "regulatorio|decision|general|auto"}
 # Clona este repo y ejecuta generar_reporte_local.py en Cloud Build; el script envía el PDF por correo.
 main:
   params: [input]
@@ -10,7 +10,8 @@ main:
           - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
           - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
           - correo_destino: ${default(map.get(input, "email"), "btoro@unal.edu.co")}
-          - prompt_busqueda: ${default(map.get(input, "prompt"), "Informe para un tomador de decisiones del sector energetico colombiano. Con el precio de bolsa, los embalses, los aportes hidricos y la demanda, evalua si hoy es buen momento o no para tomar la decision de compra o contratacion de energia. Cierra con una recomendacion concreta (tomar ahora, esperar o tomar solo una parte) y el principal riesgo.")}
+          - prompt_busqueda: ${default(map.get(input, "prompt"), "Informe para un tomador de decisiones del sector energético colombiano: con los datos más recientes de XM de precio de bolsa, precio de contratos, embalses, aportes hídricos y demanda, recomienda si hoy conviene o no hacer su compra o contratación de energía. Da una recomendación concreta (tomar ahora, esperar o tomar solo una parte), las cifras que la justifican, escenarios, estrategia según el perfil del comprador, el principal riesgo y qué señal cambiaría la recomendación.")}
+          - tipo_informe: ${default(map.get(input, "tipo"), "auto")}
           - paginas: ${string(default(map.get(input, "paginas"), 2))}
           - api_builds: ${"https://cloudbuild.googleapis.com/v1/projects/" + proyecto + "/builds"}
           - secretos: ${"projects/" + proyecto + "/secrets/"}
@@ -54,6 +55,7 @@ main:
                   - ${"PROMPT=" + prompt_busqueda}
                   - ${"EMAIL=" + correo_destino}
                   - ${"PAGINAS=" + paginas}
+                  - ${"TIPO_INFORME=" + tipo_informe}
                 script: |
                   #!/usr/bin/env bash
                   set -euo pipefail
