@@ -10,7 +10,7 @@ main:
           - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
           - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
           - correo_destino: ${default(map.get(input, "email"), "btoro@unal.edu.co")}
-          - prompt_busqueda: ${default(map.get(input, "prompt"), "Informe para un tomador de decisiones del sector energético colombiano. Con los datos más recientes de XM de precio de bolsa, precio de contratos, embalses, aportes hídricos y demanda, recomienda si hoy conviene o no hacer su compra o contratación de energía. Da una recomendación concreta (tomar ahora, esperar o tomar solo una parte), las cifras que la justifican, escenarios, estrategia según el perfil del comprador, el principal riesgo y qué señal cambiaría la recomendación.")}
+          - prompt_busqueda: ${default(map.get(input, "prompt"), "Informe para un tomador de decisiones del sector energético colombiano. Con los datos más recientes de XM, recomienda si hoy conviene o no hacer la compra o contratación de energía (tomar ahora, esperar o tomar solo una parte), con cifras, escenarios, principal riesgo y qué señal cambiaría la recomendación.")}
           - tipo_informe: ${default(map.get(input, "tipo"), "auto")}
           - paginas: ${string(default(map.get(input, "paginas"), 2))}
           - api_builds: ${"https://cloudbuild.googleapis.com/v1/projects/" + proyecto + "/builds"}
