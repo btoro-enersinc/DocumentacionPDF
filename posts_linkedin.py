@@ -50,10 +50,18 @@ def _prompt_posts(texto_informe: str, n: int) -> str:
         '- "laminas": solo en carrusel, lista de 4 títulos de lámina de máximo 40 caracteres cada uno\n'
         '- "guion": solo en video, lista de 3 o 4 escenas breves (máximo 110 caracteres cada una), '
         "empezando por el gancho de los primeros 5 segundos\n"
-        '- "texto": el texto de la publicación listo para copiar, de 60 a 110 palabras, con una primera '
-        "línea que enganche, el dato, la conexión con la solución de Enersinc y una pregunta o llamado a "
-        "la acción al cierre\n"
-        '- "hashtags": lista de 3 a 5 hashtags\n'
+        '- "texto": el texto de la publicación listo para copiar, de 120 a 200 palabras, con el estilo de '
+        "Enersinc descrito abajo; separa párrafos y viñetas con saltos de línea (\\n) y usa • para las viñetas\n"
+        '- "hashtags": lista de 3 a 5 hashtags; usa siempre #EnergíaColombia y #MercadoEléctrico y '
+        "completa con temas del post (por ejemplo #CREG, #Innovación, #Energía)\n"
+        "Estilo de Enersinc (tomado de sus publicaciones reales, por ejemplo su comentario sobre el proyecto "
+        "de resolución CREG que ajusta el Estatuto de Riesgo de Desabastecimiento): voz técnica y con postura "
+        "propia, no publicitaria. Estructura: 1) abre nombrando la norma, el dato o el hecho concreto con su "
+        "número o cifra; 2) lo que cambia o los avances, en 3 o 4 viñetas cortas y precisas sobre el mecanismo "
+        "(remuneración, despacho, contratos, señales de precio); 3) lo que sigue pendiente o los riesgos que "
+        "no se resuelven; 4) la lectura de Enersinc, una propuesta o recomendación técnica concreta; 5) cierre "
+        "invitando a medir el impacto en la operación, los contratos o la gestión energética de cada empresa "
+        "y a conversar sobre el tema.\n"
         '- "fuente": entidad o medio y fecha del dato (por ejemplo XM, 28/10/2026)\n'
         "Reglas: no inventes cifras, nombres ni citas que no estén en el informe; no uses markdown ni "
         "citas entre corchetes; Enersinc no expide normas ni opera el sistema.\n\n"
@@ -93,7 +101,8 @@ def _normalizar(post: dict, texto_informe: str):
         # Sin prefijos tipo "Gancho:" o "Escena 2:"; la página ya numera las escenas.
         "guion": [_limpio(re.sub(r"^\s*(gancho|escena\s*\d*|cierre)\s*[:.-]\s*", "", str(x), flags=re.I), 120)
                   for x in (post.get("guion") or []) if _limpio(x)][:4],
-        "texto": _limpio(post.get("texto"), 900),
+        # Conserva párrafos y viñetas: se limpia línea por línea.
+        "texto": "\n".join(ln for ln in (_limpio(x) for x in str(post.get("texto") or "").split("\n")) if ln)[:1600],
         "hashtags": [("#" + _limpio(h).lstrip("#")).replace(" ", "") for h in (post.get("hashtags") or [])
                      if _limpio(h)][:5],
         "fuente": _limpio(post.get("fuente"), 60),
@@ -226,25 +235,11 @@ def _registrar_fuentes_pdf():
     return nombres
 
 
-def _lineas(texto, fuente, tam, ancho):
-    from reportlab.pdfbase.pdfmetrics import stringWidth
-    salida = []
-    for parrafo in str(texto).split("\n"):
-        linea = ""
-        for palabra in parrafo.split():
-            prueba = (linea + " " + palabra).strip()
-            if stringWidth(prueba, fuente, tam) <= ancho:
-                linea = prueba
-            else:
-                salida.append(linea)
-                linea = palabra
-        salida.append(linea)
-    return salida
-
-
 def paginas_posts(posts, carpeta: Path, prefijo: str = "post") -> bytes:
-    """PDF (bytes) con dos publicaciones por página: imagen a la izquierda, texto a la derecha."""
+    """PDF (bytes) con una publicación por página: imagen arriba a la izquierda y el texto a su
+    derecha, que sigue a todo el ancho por debajo de la imagen."""
     from reportlab.lib.pagesizes import A4
+    from reportlab.pdfbase.pdfmetrics import stringWidth
     from reportlab.pdfgen import canvas
 
     fn = _registrar_fuentes_pdf()
@@ -252,10 +247,29 @@ def paginas_posts(posts, carpeta: Path, prefijo: str = "post") -> bytes:
     lienzo = canvas.Canvas(buf, pagesize=A4)
     ancho, alto = A4
     margen = 40
-    lado = 215
+    lado = 240
     x_txt = margen + lado + 16
     ancho_txt = ancho - margen - x_txt
-    bloque = (alto - 110) / 2
+    piso = 50
+
+    def _parrafos(texto, fuente, tam, interlinea, y, y_img, sangria=0):
+        """Escribe junto a la imagen y, al pasar su borde inferior, a todo el ancho."""
+        lienzo.setFont(fuente, tam)
+        for parrafo in str(texto).split("\n"):
+            linea = ""
+            for palabra in parrafo.split() + [None]:
+                x, w = (x_txt, ancho_txt) if y > y_img else (margen, ancho - 2 * margen)
+                prueba = (linea + " " + palabra).strip() if palabra else None
+                if palabra and stringWidth(prueba, fuente, tam) <= w - sangria:
+                    linea = prueba
+                    continue
+                if y < piso:
+                    return y
+                lienzo.drawString(x + sangria, y, linea)
+                y -= interlinea
+                linea = palabra or ""
+            y -= interlinea * 0.35
+        return y
 
     def _encabezado():
         lienzo.setFillColorRGB(0.008, 0.518, 0.780)
@@ -267,11 +281,11 @@ def paginas_posts(posts, carpeta: Path, prefijo: str = "post") -> bytes:
                                              "para publicar. Revise cifras y fuentes antes de publicar.")
 
     for i, post in enumerate(posts):
-        if i % 2 == 0:
-            if i:
-                lienzo.showPage()
-            _encabezado()
-        y_top = alto - 74 - (i % 2) * bloque
+        if i:
+            lienzo.showPage()
+        _encabezado()
+        y_top = alto - 74
+        y_img = y_top - lado - 12
         ruta = dibujar_post(post, Path(carpeta) / f"{prefijo}_{i + 1}.png", i + 1)
         lienzo.drawImage(str(ruta), margen, y_top - lado, width=lado, height=lado)
 
@@ -279,35 +293,26 @@ def paginas_posts(posts, carpeta: Path, prefijo: str = "post") -> bytes:
         lienzo.setFillColorRGB(0.008, 0.518, 0.780)
         lienzo.setFont(fn["Lato-Bold"], 8)
         lienzo.drawString(x_txt, y, f"IDEA {i + 1} · {ETIQUETA[post['formato']]}")
-        y -= 15
+        y -= 16
         lienzo.setFillColorRGB(0.06, 0.09, 0.16)
-        lienzo.setFont(fn["Montserrat-Bold"], 10.5)
-        for ln in _lineas(post["titular"], fn["Montserrat-Bold"], 10.5, ancho_txt)[:3]:
-            lienzo.drawString(x_txt, y, ln)
-            y -= 13
+        y = _parrafos(post["titular"], fn["Montserrat-Bold"], 11, 14, y, y_img)
 
         extra = []
         if post["formato"] == "carrusel" and post["laminas"]:
             extra = [f"Lámina {k + 1}: {t}" for k, t in enumerate(post["laminas"])]
         elif post["formato"] == "video" and post["guion"]:
             extra = [f"Escena {k + 1}: {t}" for k, t in enumerate(post["guion"])]
-        limite = y_top - bloque + 18
-        lienzo.setFont(fn["Lato"], 8)
-        lienzo.setFillColorRGB(0.2, 0.25, 0.33)
-        for item in extra:
-            for ln in _lineas(item, fn["Lato"], 8, ancho_txt):
-                if y < limite:
-                    break
-                lienzo.drawString(x_txt, y - 2, ln)
-                y -= 10.5
-        y -= 6
+        if extra:
+            lienzo.setFillColorRGB(0.2, 0.25, 0.33)
+            y = _parrafos("\n".join(extra), fn["Lato"], 8.5, 11, y - 2, y_img)
+
+        y -= 4
+        lienzo.setFillColorRGB(0.008, 0.518, 0.780)
+        lienzo.setFont(fn["Lato-Bold"], 8)
+        lienzo.drawString(x_txt if y > y_img else margen, y, "TEXTO PARA PUBLICAR")
+        y -= 14
         lienzo.setFillColorRGB(0.12, 0.16, 0.23)
-        lienzo.setFont(fn["Lato"], 8.5)
         cuerpo = post["texto"] + ("\n" + " ".join(post["hashtags"]) if post["hashtags"] else "")
-        for ln in _lineas(cuerpo, fn["Lato"], 8.5, ancho_txt):
-            if y < limite:
-                break
-            lienzo.drawString(x_txt, y, ln)
-            y -= 11.5
+        _parrafos(cuerpo, fn["Lato"], 9.5, 13, y, y_img)
     lienzo.save()
     return buf.getvalue()
