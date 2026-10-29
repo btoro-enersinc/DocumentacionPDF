@@ -1,6 +1,6 @@
 # Cloud Workflows: workflow-comunicaciones (us-west1, proyecto automatizaciones-ia-20260420).
 # Igual que workflow-documento, pero con un prompt extenso fijo para comunicación estratégica
-# y un solo destinatario. Se programa lunes a viernes a las 6 p. m. (America/Bogota).
+# y destinatarios fijos. Se programa todos los días a las 6 p. m. (America/Bogota).
 # Desplegar: gcloud workflows deploy workflow-comunicaciones --location=us-west1 --source=workflow-comunicaciones.yaml
 # Entrada opcional: {"email": "...", "paginas": 3, "prompt": "..."} (sin entrada usa los valores de abajo).
 main:
@@ -10,12 +10,12 @@ main:
         assign:
           - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
           - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
-          - correo_destino: ${default(map.get(input, "email"), "btoro@enersinc.com")}
+          - correo_destino: ${default(map.get(input, "email"), "btoro@enersinc.com,mmontoya@enersinc.com")}
           # Literal YAML (no es expresión), así no aplica el límite de 400 caracteres por expresión.
           - prompt_comunicaciones: >-
               Informe diario para la comunicadora estratégica de una consultora y proveedora de tecnología energética en Colombia.
               No basta con resumir noticias; el objetivo es anticipar cómo la regulación, la operación técnica del sistema y los dolores del mercado abren oportunidades de contenido y de negocio para servicios de consultoría, analítica y soluciones tecnológicas.
-              Prioriza lo publicado en las últimas 24 a 72 horas y descarta lo que no sea reciente.
+              Informe de cierre del día. Prioriza lo publicado hoy, el mismo día del informe; si una fuente no publicó nada hoy, usa lo más reciente de las últimas 48 horas e indica su fecha, y descarta lo anterior.
               Busca obligatoriamente en estas fuentes y di de cuál sale cada dato.
               Fuentes regulatorias e institucionales, primer nivel de datos, son las entidades que dictan las reglas técnicas, de mercado y de planeación.
               CREG (creg.gov.co), Comisión de Regulación de Energía y Gas, proyectos de resolución, resoluciones, circulares y audiencias, imprescindible para cambios en tarifas, esquemas de confiabilidad, agregación de demanda, respuesta de la demanda, almacenamiento, medición inteligente o remuneración de redes.
@@ -29,6 +29,7 @@ main:
               Gas, Naturgas, sobre el gas natural como combustible de transición y respaldo termoeléctrico.
               Perfiles clave de LinkedIn, revisa sus publicaciones y declaraciones públicas recientes (LinkedIn, entrevistas, columnas o eventos) y resume lo que dijeron.
               Presidentes y voceros de ACOLGEN, ASOCODIS y SER Colombia, que fijan la agenda del debate técnico y regulatorio frente al Gobierno Nacional.
+              María Nohemí Arboleda, ministra de Minas y Energía desde el 7 de agosto de 2026 y exgerente general de XM, cuyas declaraciones y publicaciones marcan la política energética del Gobierno.
               Luz Stella Murgas, presidenta de Naturgas, referente en el balance entre gas natural como combustible de transición y respaldo termoeléctrico.
               Directivos y gerentes de regulación de XM y UPME, que suelen compartir análisis breves y gráficos de demanda, estrés del sistema y avances de proyectos antes de los comunicados extensos.
               Exministros y exviceministros de Minas y Energía como Tomás González, Germán Arce y Diego Mesa, con visión macroeconómica y análisis crítico de política pública.
@@ -148,9 +149,9 @@ main:
           build: ${build_id}
           log: ${estado.body.logUrl}
 
-# Programación (lunes a viernes, 6 p. m. hora Colombia):
+# Programación (todos los días, 6 p. m. hora Colombia):
 # gcloud scheduler jobs create http informe-comunicaciones-18h --location=us-west1 \
-#   --schedule="0 18 * * 1-5" --time-zone="America/Bogota" \
+#   --schedule="0 18 * * *" --time-zone="America/Bogota" \
 #   --uri="https://workflowexecutions.googleapis.com/v1/projects/automatizaciones-ia-20260420/locations/us-west1/workflows/workflow-comunicaciones/executions" \
 #   --http-method=POST --message-body='{"argument": "{}"}' \
-#   --oauth-service-account-email=<NUMERO_PROYECTO>-compute@developer.gserviceaccount.com
+#   --oauth-service-account-email=86171080709-compute@developer.gserviceaccount.com
