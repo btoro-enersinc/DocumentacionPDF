@@ -2325,9 +2325,9 @@ def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> st
                  "secretariasenado.gov.co, funcionpublica.gov.co o suin-juriscol.gov.co")
     if enfoque == "linkedin":
         guia = ("Busca SOLO publicaciones públicas de LinkedIn (posts y artículos) de las personas, cargos y "
-                "organizaciones que nombra la pregunta. Usa consultas con site:linkedin.com/posts y "
-                "site:linkedin.com/pulse más el nombre de la persona o la organización, por ejemplo "
-                "site:linkedin.com/posts Naturgas. Para cada hallazgo indica quién publicó, la fecha y la idea "
+                "organizaciones que nombra la pregunta. Combina consultas por nombre con la palabra LinkedIn "
+                "(por ejemplo Luz Stella Murgas LinkedIn, o ACOLGEN LinkedIn energía) con consultas "
+                "site:linkedin.com/posts y site:linkedin.com/pulse. Para cada hallazgo indica quién publicó, la fecha y la idea "
                 "principal con sus palabras; si no ves la fecha, dilo. No atribuyas a nadie algo que no "
                 "aparezca en la página.")
         return (
