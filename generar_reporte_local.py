@@ -1540,6 +1540,8 @@ RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or "gemini-2.5-flash"
 CORRECTION_MODEL = os.environ.get("CORRECTION_MODEL") or RESEARCH_MODEL
 CORRECTION_TIMEOUT_SECONDS = int(os.environ.get("CORRECTION_TIMEOUT_SECONDS") or "90")
 FAST_REPORT = os.environ.get("FAST_REPORT", "").strip().lower() in {"1", "true", "si", "sí"}
+# Oculta la pregunta en el PDF (informes programados con prompt largo).
+OCULTAR_PROMPT = os.environ.get("OCULTAR_PROMPT", "").strip().lower() in {"1", "true", "si", "sí"}
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
 HTTP_TIMEOUT = int(os.environ.get("HTTP_TIMEOUT_SECONDS") or "20")
 LLM_TIMEOUT_SECONDS = int(os.environ.get("LLM_TIMEOUT_SECONDS") or "150")
@@ -3585,7 +3587,7 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
     try:
         # Los informes programados no muestran la instrucción que los genera.
         info = markdown_a_pdf(
-            texto_respuesta, titulo_reporte, prompt if tipo == "general" else "", correo_destino, str(ruta_pdf),
+            texto_respuesta, titulo_reporte, prompt if tipo == "general" and not OCULTAR_PROMPT else "", correo_destino, str(ruta_pdf),
             max_pages=max_pages,
             referencia=f"ENR-{numero}-" + timestamp_archivo.replace("_", "-"),
             fuentes=fuentes, verificacion=verificacion, graficas=graficas,

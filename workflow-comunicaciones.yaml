@@ -72,10 +72,11 @@ main:
                   - API_GATEWAY_DATOS_KEY
                   - GCP_SA_JSON
                 env:
-                  - AGENT_BACKEND=local   # sin borrador del agente CES: solo investigación con fuentes
+                  - AGENT_BACKEND=ces
                   - EMAIL_SENDER=contacto@enersinc.com
                   - PYTHONUNBUFFERED=1
                   - FAST_REPORT=1
+                  - OCULTAR_PROMPT=1
                   - GROUNDED_MODEL=gemini-2.5-flash
                   - MAX_FUENTES_EVIDENCIA=16
                   - MAX_FUENTES_INFORME=8
