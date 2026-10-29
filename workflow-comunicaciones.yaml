@@ -16,17 +16,25 @@ main:
               Informe diario para la comunicadora estratégica de una consultora y proveedora de tecnología energética en Colombia.
               No basta con resumir noticias; el objetivo es anticipar cómo la regulación, la operación técnica del sistema y los dolores del mercado abren oportunidades de contenido y de negocio para servicios de consultoría, analítica y soluciones tecnológicas.
               Prioriza lo publicado en las últimas 24 a 72 horas y descarta lo que no sea reciente.
-              Fuentes regulatorias e institucionales, primer nivel de datos.
-              CREG, proyectos de resolución, resoluciones, circulares y audiencias sobre tarifas, confiabilidad, agregación de demanda, respuesta de la demanda, almacenamiento, medición inteligente o remuneración de redes.
-              XM, embalses, precio de bolsa, demanda, aportes hídricos, limitaciones de transmisión y comunicados operativos, con cifras concretas aptas para infografías.
-              UPME, planes de expansión de generación y transmisión, convocatorias de infraestructura y atlas de recursos solar y eólico.
-              Ministerio de Minas y Energía y Superservicios, políticas públicas, transición energética justa y vigilancia a distribuidoras y comercializadoras.
-              Medios y gremios. La República, Portafolio, Valora Analitik, Energía Estratégica Latam y BNamericas para cierres financieros, subastas, inversiones y coyuntura.
-              ACOLGEN y Andeg para seguridad de suministro, confiabilidad y respaldo térmico.
-              ASOCODIS y Andesco para medición inteligente AMI, calidad del servicio, pérdidas no técnicas y tarifas.
-              SER Colombia para FNCER, almacenamiento con baterías BESS, microrredes e integración a la red.
-              Naturgas para el papel del gas natural como combustible de transición y respaldo termoeléctrico.
-              Voces a seguir. Presidentes y voceros de ACOLGEN, ASOCODIS, SER Colombia y Naturgas, directivos de XM y UPME, exministros y exviceministros de Minas y Energía, analistas de firmas de consultoría energética y líderes de innovación y digitalización de Enel Colombia, EPM, Celsia e ISA, cuando sus declaraciones públicas recientes marquen la agenda.
+              Busca obligatoriamente en estas fuentes y di de cuál sale cada dato.
+              Fuentes regulatorias e institucionales, primer nivel de datos, son las entidades que dictan las reglas técnicas, de mercado y de planeación.
+              CREG (creg.gov.co), Comisión de Regulación de Energía y Gas, proyectos de resolución, resoluciones, circulares y audiencias, imprescindible para cambios en tarifas, esquemas de confiabilidad, agregación de demanda, respuesta de la demanda, almacenamiento, medición inteligente o remuneración de redes.
+              XM (xm.com.co), operador del SIN y administrador del mercado, reportes diarios de embalses, precio de bolsa, demanda, aportes hídricos, limitaciones de transmisión y comunicados operativos, con cifras reales aptas para infografías o análisis.
+              UPME (upme.gov.co), Unidad de Planeación Minero Energética, planes de expansión de generación y transmisión, atlas de recursos solar y eólico y convocatorias de infraestructura.
+              Ministerio de Minas y Energía (minenergia.gov.co) y Superservicios (superservicios.gov.co), políticas públicas, directrices de transición energética justa y vigilancia del cumplimiento normativo de distribuidoras y comercializadoras.
+              Medios económicos y especializados, Diario La República (secciones Economía y Empresas), Portafolio, Valora Analitik, Energía Estratégica Latam y BNamericas, que cubren cierres financieros, subastas, inversiones corporativas y debates de coyuntura energética.
+              Gremios de generación y transmisión, ACOLGEN (generadores) y Andeg (térmicas y respaldo), que analizan seguridad de suministro, confiabilidad del parque de generación e hidroclimatología.
+              Gremios de distribución y mercado, ASOCODIS (distribuidoras y comercializadoras) y Andesco (servicios públicos), clave para medición inteligente AMI, calidad del servicio, pérdidas no técnicas y tarifas.
+              Renovables y nuevas tecnologías, SER Colombia (Asociación de Energías Renovables), con foco en FNCER solar y eólica, almacenamiento con baterías BESS, microrredes e integración a la red.
+              Gas, Naturgas, sobre el gas natural como combustible de transición y respaldo termoeléctrico.
+              Perfiles clave de LinkedIn, revisa sus publicaciones y declaraciones públicas recientes (LinkedIn, entrevistas, columnas o eventos) y resume lo que dijeron.
+              Presidentes y voceros de ACOLGEN, ASOCODIS y SER Colombia, que fijan la agenda del debate técnico y regulatorio frente al Gobierno Nacional.
+              Luz Stella Murgas, presidenta de Naturgas, referente en el balance entre gas natural como combustible de transición y respaldo termoeléctrico.
+              Directivos y gerentes de regulación de XM y UPME, que suelen compartir análisis breves y gráficos de demanda, estrés del sistema y avances de proyectos antes de los comunicados extensos.
+              Exministros y exviceministros de Minas y Energía como Tomás González, Germán Arce y Diego Mesa, con visión macroeconómica y análisis crítico de política pública.
+              Directores y analistas de firmas de consultoría energética como SER Ingenergía, Quantum y Phinance, que comparten análisis de precios de bolsa, riesgos contractuales y balances de oferta y demanda.
+              Líderes de innovación y digitalización de Enel Colombia, EPM, Celsia e ISA, que publican sobre pilotos de automatización de subestaciones, gemelos digitales, redes inteligentes y ciberseguridad industrial.
+              No inventes citas ni publicaciones; si no encuentras nada reciente de una persona, no la menciones.
               Estructura del informe.
               Primero, lo más importante del día en tres a cinco viñetas con cifra, fecha y fuente.
               Segundo, para cada noticia relevante explica qué pasó, a quién impacta y qué oportunidad abre para la empresa.
@@ -34,8 +42,9 @@ main:
               De contingencia a solución técnica, si hay volatilidad en el precio de bolsa o estrés hídrico, no te limites a la cifra y conecta con cómo la analítica predictiva o los sistemas de gestión energética EMS reducen la exposición al riesgo de grandes consumidores.
               De cambio regulatorio a consultoría, si la CREG publica un proyecto normativo, propón un carrusel pedagógico de cuatro láminas con qué cambia, a quién impacta, qué brechas tecnológicas exige resolver y cómo puede ayudar la empresa.
               De reto operativo a caso de uso, si se discuten pérdidas técnicas o demoras en conexiones de renovables, propón contenido de lecciones aprendidas y buenas prácticas en estudios de conexión y digitalización de redes de distribución.
-              Tercero, una agenda de contenidos con tres ideas de publicación para LinkedIn, cada una con titular sugerido, formato (carrusel, infografía, post corto o artículo), dato de respaldo y mensaje clave.
-              Cuarto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
+              Tercero, qué dicen las voces del sector, con lo más relevante que publicaron o declararon los perfiles clave, indicando quién, dónde y cuándo.
+              Cuarto, una agenda de contenidos con tres ideas de publicación para LinkedIn, cada una con titular sugerido, formato (carrusel, infografía, post corto o artículo), dato de respaldo y mensaje clave.
+              Quinto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
               Usa lenguaje claro y profesional, sin tecnicismos innecesarios, y cita siempre la fuente de cada dato.
           - prompt_busqueda: ${default(map.get(input, "prompt"), prompt_comunicaciones)}
           - tipo_informe: ${default(map.get(input, "tipo"), "general")}
