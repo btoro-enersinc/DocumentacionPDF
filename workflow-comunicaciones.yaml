@@ -40,10 +40,10 @@ main:
               Segundo, para cada noticia relevante explica qué pasó, a quién impacta y qué oportunidad abre para la empresa.
               Aplica este enfoque editorial.
               De contingencia a solución técnica, si hay volatilidad en el precio de bolsa o estrés hídrico, no te limites a la cifra y conecta con cómo la analítica predictiva o los sistemas de gestión energética EMS reducen la exposición al riesgo de grandes consumidores.
-              De cambio regulatorio a consultoría, si la CREG publica un proyecto normativo, propón un carrusel pedagógico de cuatro láminas con qué cambia, a quién impacta, qué brechas tecnológicas exige resolver y cómo puede ayudar la empresa.
+              De cambio regulatorio a consultoría, si la CREG publica un proyecto normativo, propón un video pedagógico corto en cuatro momentos, qué cambia, a quién impacta, qué brechas tecnológicas exige resolver y cómo puede ayudar la empresa.
               De reto operativo a caso de uso, si se discuten pérdidas técnicas o demoras en conexiones de renovables, propón contenido de lecciones aprendidas y buenas prácticas en estudios de conexión y digitalización de redes de distribución.
               Tercero, qué dicen las voces del sector, con lo más relevante que publicaron o declararon los perfiles clave, indicando quién, dónde y cuándo.
-              Cuarto, una agenda de contenidos con tres ideas de publicación para LinkedIn, cada una con titular sugerido, formato (carrusel, infografía, post corto o artículo), dato de respaldo y mensaje clave.
+              Cuarto, una agenda de contenidos con tres ideas de video para LinkedIn, todas en formato de video corto de 30 a 90 segundos, cada una con titular sugerido, gancho de los primeros 5 segundos, guion breve por escenas o momentos, apoyo visual sugerido (gráfica de datos, animación, vocero a cámara o grabación en campo), dato de respaldo con su fuente y mensaje clave o llamado a la acción.
               Quinto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
               Usa lenguaje claro y profesional, sin tecnicismos innecesarios, y cita siempre la fuente de cada dato.
           - prompt_busqueda: ${default(map.get(input, "prompt"), prompt_comunicaciones)}
