@@ -72,7 +72,7 @@ main:
                   - API_GATEWAY_DATOS_KEY
                   - GCP_SA_JSON
                 env:
-                  - AGENT_BACKEND=ces
+                  - AGENT_BACKEND=local   # sin borrador del agente CES: solo investigación con fuentes
                   - EMAIL_SENDER=contacto@enersinc.com
                   - PYTHONUNBUFFERED=1
                   - FAST_REPORT=1
