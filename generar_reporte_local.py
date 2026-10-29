@@ -1540,6 +1540,9 @@ RESEARCH_MODEL = os.environ.get("RESEARCH_MODEL") or "gemini-2.5-flash"
 CORRECTION_MODEL = os.environ.get("CORRECTION_MODEL") or RESEARCH_MODEL
 CORRECTION_TIMEOUT_SECONDS = int(os.environ.get("CORRECTION_TIMEOUT_SECONDS") or "90")
 FAST_REPORT = os.environ.get("FAST_REPORT", "").strip().lower() in {"1", "true", "si", "sí"}
+# Búsquedas adicionales a la oficial, separadas por coma: "general" (medios y gremios, también en
+# modo rápido) y "linkedin" (publicaciones públicas indexadas por Google, sin iniciar sesión).
+BUSQUEDAS_EXTRA = {b.strip().lower() for b in (os.environ.get("BUSQUEDAS_EXTRA") or "").split(",") if b.strip()}
 # Oculta la pregunta en el PDF (informes programados con prompt largo).
 OCULTAR_PROMPT = os.environ.get("OCULTAR_PROMPT", "").strip().lower() in {"1", "true", "si", "sí"}
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
@@ -2320,6 +2323,22 @@ def _prompt_investigacion(pregunta: str, enfoque: str, contexto: str = "") -> st
                  "xm.com.co (informes mensuales del mercado: precio de bolsa, embalses, aportes, generación, demanda), "
                  "upme.gov.co, minenergia.gov.co, superservicios.gov.co, y para leyes y decretos "
                  "secretariasenado.gov.co, funcionpublica.gov.co o suin-juriscol.gov.co")
+    if enfoque == "linkedin":
+        guia = ("Busca SOLO publicaciones públicas de LinkedIn (posts y artículos) de las personas, cargos y "
+                "organizaciones que nombra la pregunta. Usa consultas con site:linkedin.com/posts y "
+                "site:linkedin.com/pulse más el nombre de la persona o la organización, por ejemplo "
+                "site:linkedin.com/posts Naturgas. Para cada hallazgo indica quién publicó, la fecha y la idea "
+                "principal con sus palabras; si no ves la fecha, dilo. No atribuyas a nadie algo que no "
+                "aparezca en la página.")
+        return (
+            f"FECHA ACTUAL: {fecha} (Colombia). Solo interesan publicaciones de las últimas dos semanas.\n"
+            f"{guia}\n\nPREGUNTA DEL USUARIO: {pregunta.strip()}\n"
+            f"\nHaz como máximo {max_busquedas} búsquedas web y detente. Devuelve entre 3 y 8 hallazgos, "
+            "uno por línea, con este formato exacto:\n"
+            "- <autor y cargo>: <idea principal de la publicación> | <fecha> | LinkedIn | "
+            "<URL exacta de la publicación>\n"
+            "Si no encuentras publicaciones recientes, devuelve solo: SIN HALLAZGOS."
+        )
     if enfoque == "oficial":
         guia = (f"Busca SOLO en fuentes oficiales colombianas: {oficiales}. Usa consultas con el operador "
                 "site: (p. ej. site:gestornormativo.creg.gov.co, site:xm.com.co). Incluye las normas vigentes "
@@ -2439,15 +2458,20 @@ def recopilar_evidencia(pregunta: str, borrador: str = ""):
             )
             for i, consulta in enumerate(consultas_oficiales)
         ]
-        fut_ge = None if FAST_REPORT else ex.submit(_investigar_grounded, pregunta, "general", borrador)
+        fut_ge = (ex.submit(_investigar_grounded, pregunta, "general", borrador)
+                  if not FAST_REPORT or "general" in BUSQUEDAS_EXTRA else None)
+        fut_li = (ex.submit(_investigar_grounded, pregunta, "linkedin", "", 1,
+                            min(RESEARCH_TIMEOUT_SECONDS, 55) if FAST_REPORT else None)
+                  if "linkedin" in BUSQUEDAS_EXTRA else None)
         fut_nov = ex.submit(_novedades_creg, pregunta) if tema_reg else None
         fut_xm = ex.submit(_noticias_xm, pregunta) if tema_mer else None
         res_oficiales = [f.result() for f in fut_oficiales]
         res_ge = fut_ge.result() if fut_ge else ("", [], [])
+        res_li = fut_li.result() if fut_li else ("", [], [])
         nov_fuente, nov_normas = fut_nov.result() if fut_nov else (None, [])
         xm_urls = fut_xm.result() if fut_xm else []
 
-    resultados_busqueda = res_oficiales + ([res_ge] if fut_ge else [])
+    resultados_busqueda = res_oficiales + ([res_ge] if fut_ge else []) + ([res_li] if fut_li else [])
     if FAST_REPORT and not any(texto or chunks for texto, chunks, _ in resultados_busqueda):
         _log("   Las consultas paralelas no respondieron; se hace un último intento oficial reducido.")
         resultados_busqueda.append(_investigar_grounded(
@@ -2524,8 +2548,10 @@ def recopilar_evidencia(pregunta: str, borrador: str = ""):
     for url, origen, titulo, notas, info in res_cand:
         if info["ok"]:
             _agregar(info, origen, titulo, notas)
-        elif origen == "grounding" and info.get("status") in (401, 403, 429) and notas:
-            # Página existe pero bloquea bots: se conserva con el texto de apoyo del grounding.
+        elif origen == "grounding" and notas and (info.get("status") in (401, 403, 429, 999)
+                                                  or "linkedin.com" in _dominio(url)):
+            # Página existe pero bloquea bots (LinkedIn responde 999 o pide iniciar sesión):
+            # se conserva con el texto de apoyo del grounding.
             info = dict(info, ok=True, texto="", titulo=titulo or _dominio(url), restringida=True)
             _agregar(info, origen, titulo, notas)
         else:
@@ -2554,7 +2580,9 @@ def recopilar_evidencia(pregunta: str, borrador: str = ""):
         lista.append(f)
     prioridad = {"oficial": 0, "medio": 1, "otro": 2}
     origen_p = {"norma": 0, "semilla": 1, "grounding": 2, "modelo": 3}
-    lista.sort(key=lambda f: (prioridad.get(f["tipo"], 3), origen_p.get(f.get("origen"), 4)))
+    # Si se pidió LinkedIn, sus publicaciones compiten con los medios y no quedan al final.
+    lista.sort(key=lambda f: (1 if "linkedin" in BUSQUEDAS_EXTRA and "linkedin.com" in _dominio(f["url_final"])
+                              else prioridad.get(f["tipo"], 3), origen_p.get(f.get("origen"), 4)))
     lista = lista[:MAX_FUENTES_EVIDENCIA]
     for i, f in enumerate(lista, 1):
         f["id"] = i

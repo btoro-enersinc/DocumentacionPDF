@@ -86,6 +86,7 @@ main:
                   - PYTHONUNBUFFERED=1
                   - FAST_REPORT=1
                   - OCULTAR_PROMPT=1
+                  - BUSQUEDAS_EXTRA=general,linkedin
                   - GROUNDED_MODEL=gemini-2.5-flash
                   - MAX_FUENTES_EVIDENCIA=16
                   - MAX_FUENTES_INFORME=8
