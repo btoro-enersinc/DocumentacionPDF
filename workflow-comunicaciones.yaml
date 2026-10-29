@@ -1,0 +1,144 @@
+# Cloud Workflows: workflow-comunicaciones (us-west1, proyecto automatizaciones-ia-20260420).
+# Igual que workflow-documento, pero con un prompt extenso fijo para comunicación estratégica
+# y un solo destinatario. Se programa lunes a viernes a las 6 p. m. (America/Bogota).
+# Desplegar: gcloud workflows deploy workflow-comunicaciones --location=us-west1 --source=workflow-comunicaciones.yaml
+# Entrada opcional: {"email": "...", "paginas": 3, "prompt": "..."} (sin entrada usa los valores de abajo).
+main:
+  params: [input]
+  steps:
+    - inicializar_variables:
+        assign:
+          - proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_ID")}
+          - numero_proyecto: ${sys.get_env("GOOGLE_CLOUD_PROJECT_NUMBER")}
+          - correo_destino: ${default(map.get(input, "email"), "btoro@enersinc.com")}
+          # Literal YAML (no es expresión), así no aplica el límite de 400 caracteres por expresión.
+          - prompt_comunicaciones: >-
+              Informe diario para la comunicadora estratégica de una consultora y proveedora de tecnología energética en Colombia.
+              No basta con resumir noticias; el objetivo es anticipar cómo la regulación, la operación técnica del sistema y los dolores del mercado abren oportunidades de contenido y de negocio para servicios de consultoría, analítica y soluciones tecnológicas.
+              Prioriza lo publicado en las últimas 24 a 72 horas y descarta lo que no sea reciente.
+              Fuentes regulatorias e institucionales, primer nivel de datos.
+              CREG, proyectos de resolución, resoluciones, circulares y audiencias sobre tarifas, confiabilidad, agregación de demanda, respuesta de la demanda, almacenamiento, medición inteligente o remuneración de redes.
+              XM, embalses, precio de bolsa, demanda, aportes hídricos, limitaciones de transmisión y comunicados operativos, con cifras concretas aptas para infografías.
+              UPME, planes de expansión de generación y transmisión, convocatorias de infraestructura y atlas de recursos solar y eólico.
+              Ministerio de Minas y Energía y Superservicios, políticas públicas, transición energética justa y vigilancia a distribuidoras y comercializadoras.
+              Medios y gremios. La República, Portafolio, Valora Analitik, Energía Estratégica Latam y BNamericas para cierres financieros, subastas, inversiones y coyuntura.
+              ACOLGEN y Andeg para seguridad de suministro, confiabilidad y respaldo térmico.
+              ASOCODIS y Andesco para medición inteligente AMI, calidad del servicio, pérdidas no técnicas y tarifas.
+              SER Colombia para FNCER, almacenamiento con baterías BESS, microrredes e integración a la red.
+              Naturgas para el papel del gas natural como combustible de transición y respaldo termoeléctrico.
+              Voces a seguir. Presidentes y voceros de ACOLGEN, ASOCODIS, SER Colombia y Naturgas, directivos de XM y UPME, exministros y exviceministros de Minas y Energía, analistas de firmas de consultoría energética y líderes de innovación y digitalización de Enel Colombia, EPM, Celsia e ISA, cuando sus declaraciones públicas recientes marquen la agenda.
+              Estructura del informe.
+              Primero, lo más importante del día en tres a cinco viñetas con cifra, fecha y fuente.
+              Segundo, para cada noticia relevante explica qué pasó, a quién impacta y qué oportunidad abre para la empresa.
+              Aplica este enfoque editorial.
+              De contingencia a solución técnica, si hay volatilidad en el precio de bolsa o estrés hídrico, no te limites a la cifra y conecta con cómo la analítica predictiva o los sistemas de gestión energética EMS reducen la exposición al riesgo de grandes consumidores.
+              De cambio regulatorio a consultoría, si la CREG publica un proyecto normativo, propón un carrusel pedagógico de cuatro láminas con qué cambia, a quién impacta, qué brechas tecnológicas exige resolver y cómo puede ayudar la empresa.
+              De reto operativo a caso de uso, si se discuten pérdidas técnicas o demoras en conexiones de renovables, propone contenido de lecciones aprendidas y buenas prácticas en estudios de conexión y digitalización de redes de distribución.
+              Tercero, una agenda de contenidos con tres ideas de publicación para LinkedIn, cada una con titular sugerido, formato (carrusel, infografía, post corto o artículo), dato de respaldo y mensaje clave.
+              Cuarto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
+              Usa lenguaje claro y profesional, sin tecnicismos innecesarios, y cita siempre la fuente de cada dato.
+          - prompt_busqueda: ${default(map.get(input, "prompt"), prompt_comunicaciones)}
+          - tipo_informe: ${default(map.get(input, "tipo"), "general")}
+          - paginas: ${string(default(map.get(input, "paginas"), 3))}
+          - api_builds: ${"https://cloudbuild.googleapis.com/v1/projects/" + proyecto + "/builds"}
+          - secretos: ${"projects/" + proyecto + "/secrets/"}
+
+    - lanzar_build:
+        call: http.post
+        args:
+          url: ${api_builds}
+          auth:
+            type: OAuth2
+          body:
+            timeout: "900s"
+            serviceAccount: ${"projects/" + proyecto + "/serviceAccounts/" + numero_proyecto + "-compute@developer.gserviceaccount.com"}
+            options:
+              logging: CLOUD_LOGGING_ONLY
+            availableSecrets:
+              secretManager:
+                - versionName: ${secretos + "api-gateway-datos-url/versions/latest"}
+                  env: API_GATEWAY_DATOS_URL
+                - versionName: ${secretos + "api-gateway-datos-key/versions/latest"}
+                  env: API_GATEWAY_DATOS_KEY
+                - versionName: ${secretos + "gcp-sa-json/versions/latest"}
+                  env: GCP_SA_JSON
+            steps:
+              - name: gcr.io/cloud-builders/git
+                args: ["clone", "--depth", "1", "--branch", "main", "https://github.com/btoro-enersinc/DocumentacionPDF.git", "src"]
+              - name: python:3.12-slim
+                dir: src
+                secretEnv:
+                  - API_GATEWAY_DATOS_URL
+                  - API_GATEWAY_DATOS_KEY
+                  - GCP_SA_JSON
+                env:
+                  - AGENT_BACKEND=ces
+                  - EMAIL_SENDER=contacto@enersinc.com
+                  - PYTHONUNBUFFERED=1
+                  - FAST_REPORT=1
+                  - GROUNDED_MODEL=gemini-2.5-flash
+                  - MAX_FUENTES_EVIDENCIA=16
+                  - MAX_FUENTES_INFORME=8
+                  - ${"PROMPT=" + prompt_busqueda}
+                  - ${"EMAIL=" + correo_destino}
+                  - ${"PAGINAS=" + paginas}
+                  - ${"TIPO_INFORME=" + tipo_informe}
+                script: |
+                  #!/usr/bin/env bash
+                  set -euo pipefail
+                  printf '%s' "$GCP_SA_JSON" > /tmp/gcp.json
+                  export GOOGLE_APPLICATION_CREDENTIALS=/tmp/gcp.json
+                  export GOOGLE_CLOUD_PROJECT=automatizaciones-ia-20260420
+                  pip install -q --root-user-action=ignore --disable-pip-version-check -r requirements.txt
+                  case "$PAGINAS" in
+                    ''|*[!0-9]*) PAGINAS=2 ;;
+                  esac
+                  if [ "$PAGINAS" -lt 2 ]; then PAGINAS=2; fi
+                  python generar_reporte_local.py \
+                    --pregunta "$PROMPT" \
+                    --correo "$EMAIL" \
+                    --max-pages "$PAGINAS"
+        result: lanzado
+
+    - guardar_id:
+        assign:
+          - build_id: ${lanzado.body.metadata.build.id}
+
+    - esperar:
+        call: sys.sleep
+        args:
+          seconds: 10
+
+    - consultar:
+        call: http.get
+        args:
+          url: ${api_builds + "/" + build_id}
+          auth:
+            type: OAuth2
+        result: estado
+
+    - revisar:
+        switch:
+          - condition: ${estado.body.status == "SUCCESS"}
+            next: responder
+          - condition: ${estado.body.status in ["FAILURE", "INTERNAL_ERROR", "TIMEOUT", "CANCELLED", "EXPIRED"]}
+            raise:
+              mensaje: ${"El build terminó en " + estado.body.status}
+              build: ${build_id}
+              log: ${estado.body.logUrl}
+        next: esperar
+
+    - responder:
+        return:
+          estado: "Informe enviado"
+          correo: ${correo_destino}
+          paginas: ${paginas}
+          build: ${build_id}
+          log: ${estado.body.logUrl}
+
+# Programación (lunes a viernes, 6 p. m. hora Colombia):
+# gcloud scheduler jobs create http informe-comunicaciones-18h --location=us-west1 \
+#   --schedule="0 18 * * 1-5" --time-zone="America/Bogota" \
+#   --uri="https://workflowexecutions.googleapis.com/v1/projects/automatizaciones-ia-20260420/locations/us-west1/workflows/workflow-comunicaciones/executions" \
+#   --http-method=POST --message-body='{"argument": "{}"}' \
+#   --oauth-service-account-email=<NUMERO_PROYECTO>-compute@developer.gserviceaccount.com
