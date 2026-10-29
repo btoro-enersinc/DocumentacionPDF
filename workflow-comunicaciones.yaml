@@ -43,15 +43,9 @@ main:
               De cambio regulatorio a consultoría, si la CREG publica un proyecto normativo, propón un carrusel pedagógico de cuatro láminas o un video corto con qué cambia, a quién impacta, qué brechas tecnológicas exige resolver y cómo puede ayudar la empresa.
               De reto operativo a caso de uso, si se discuten pérdidas técnicas o demoras en conexiones de renovables, propón contenido de lecciones aprendidas y buenas prácticas en estudios de conexión y digitalización de redes de distribución.
               Tercero, qué dicen las voces del sector, con lo más relevante que publicaron o declararon los perfiles clave, indicando quién, dónde y cuándo.
-              Cuarto, una agenda de contenidos con cuatro ideas de publicación para LinkedIn en formatos variados (carrusel, infografía, post corto, artículo o video), cada una con titular sugerido, formato, dato de respaldo y mensaje clave.
-              Al menos una o dos de esas ideas deben ser de video corto de 30 a 90 segundos e incluir además el gancho de los primeros 5 segundos, un guion breve por escenas y el apoyo visual sugerido (gráfica de datos, animación, vocero a cámara o grabación en campo).
-              Redacta además cada publicación completa y lista para copiar y publicar en LinkedIn a nombre de la empresa, no solo la idea.
-              Para post corto o artículo escribe el texto final de 120 a 200 palabras, con una primera línea que enganche, el dato con su fuente, la conexión con la solución de la empresa, una pregunta o llamado a la acción al cierre y tres a cinco hashtags.
-              Para carrusel o infografía escribe el texto de cada lámina o bloque y el texto que acompaña la publicación.
-              Para video escribe el texto que acompaña la publicación y el guion completo que dice el vocero.
-              Tono cercano, profesional y de aliado estratégico, sin sonar a publicidad, y sin inventar cifras ni citas que no estén en el informe.
-              Quinto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
+              Cuarto, fechas próximas a vigilar como audiencias, plazos de comentarios, subastas o publicaciones esperadas.
               Usa lenguaje claro y profesional, sin tecnicismos innecesarios, y cita siempre la fuente de cada dato.
+              No incluyas ideas ni borradores de publicaciones para redes; esas se generan aparte con imágenes al final del informe.
           - prompt_busqueda: ${default(map.get(input, "prompt"), prompt_comunicaciones)}
           - tipo_informe: ${default(map.get(input, "tipo"), "general")}
           - paginas: ${string(default(map.get(input, "paginas"), 3))}
@@ -93,6 +87,7 @@ main:
                   - FAST_REPORT=1
                   - OCULTAR_PROMPT=1
                   - BUSQUEDAS_EXTRA=general,linkedin
+                  - POSTS_LINKEDIN=4
                   - GROUNDED_MODEL=gemini-2.5-flash
                   - MAX_FUENTES_EVIDENCIA=16
                   - MAX_FUENTES_INFORME=8

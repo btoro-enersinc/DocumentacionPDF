@@ -1543,6 +1543,8 @@ FAST_REPORT = os.environ.get("FAST_REPORT", "").strip().lower() in {"1", "true",
 # Búsquedas adicionales a la oficial, separadas por coma: "general" (medios y gremios, también en
 # modo rápido) y "linkedin" (publicaciones públicas indexadas por Google, sin iniciar sesión).
 BUSQUEDAS_EXTRA = {b.strip().lower() for b in (os.environ.get("BUSQUEDAS_EXTRA") or "").split(",") if b.strip()}
+# Publicaciones de LinkedIn ya hechas (imagen de ejemplo + texto) que se añaden al PDF; 0 = ninguna.
+POSTS_LINKEDIN = int(os.environ.get("POSTS_LINKEDIN") or "0")
 # Oculta la pregunta en el PDF (informes programados con prompt largo).
 OCULTAR_PROMPT = os.environ.get("OCULTAR_PROMPT", "").strip().lower() in {"1", "true", "si", "sí"}
 VERTEX_LOCATION = os.environ.get("VERTEX_LOCATION") or "global"
@@ -3626,6 +3628,32 @@ def ejecutar_flujo_completo(prompt, correo_destino, remitente_email="", password
     print(f"   Páginas: {info['paginas']} (objetivo {max_pages}) · fuente {info['font_pt']}pt · "
           f"{info.get('palabras_pdf', 0)} palabras"
           + (" · se omitieron párrafos del análisis en el PDF (el .md conserva todo)" if info["recortado"] else ""))
+
+    if POSTS_LINKEDIN > 0:
+        # Páginas propias al final, como las gráficas; si algo falla el informe sale igual.
+        try:
+            from posts_linkedin import proponer_posts, paginas_posts
+            posts = proponer_posts(
+                texto_respuesta,
+                lambda p: _texto_respuesta_llm(_llm(p, model=RESEARCH_MODEL, temperature=0.7,
+                                                    intentos=1, timeout_s=60)),
+                POSTS_LINKEDIN,
+            )
+            if posts:
+                prefijo = Path(nombre_archivo_reporte(reporte_id, timestamp_archivo, "png")).stem + "_post"
+                extra = paginas_posts(posts, GRAFICAS_DIR, prefijo)
+                writer = PdfWriter()
+                for doc in (ruta_pdf.read_bytes(), extra):
+                    for pagina in PdfReader(io.BytesIO(doc)).pages:
+                        writer.add_page(pagina)
+                with open(ruta_pdf, "wb") as fh:
+                    writer.write(fh)
+                print(f"   Publicaciones LinkedIn: {len(posts)} "
+                      f"({', '.join(p['formato'] for p in posts)}) en páginas propias.")
+            else:
+                print("   Publicaciones LinkedIn omitidas: el modelo no devolvió propuestas válidas.")
+        except Exception as exc:
+            print(f"   Publicaciones LinkedIn omitidas: {type(exc).__name__}: {exc}")
 
     ruta_abs = str(ruta_pdf.resolve())
     actualizar_estado_db(reporte_id, estado_inicial)
